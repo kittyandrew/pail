@@ -1,0 +1,8 @@
+/target
+/data
+config.toml
+*.swp
+*.swo
+.direnv/
+result
+digest.md

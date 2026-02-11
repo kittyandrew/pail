@@ -1,0 +1,51 @@
+[pail]
+version = 1
+data_dir = "./data"
+retention = "7d"
+timezone = "Europe/Kyiv"
+log_level = "info"
+max_concurrent_generations = 1
+
+[database]
+path = "pail.db"
+
+[opencode]
+binary = "opencode"
+default_model = "opencode/big-pickle"
+timeout = "10m"
+max_retries = 1
+# extra_args = ["--format", "json"]   # additional flags passed to `opencode run`
+
+[[source]]
+name = "Hacker News"
+type = "rss"
+url = "https://hnrss.org/frontpage"
+poll_interval = "15m"
+
+[[source]]
+name = "Lobsters"
+type = "rss"
+url = "https://lobste.rs/rss"
+
+# Example: authenticated RSS feed
+# [[source]]
+# name = "Private Feed"
+# type = "rss"
+# url = "https://example.com/feed.xml"
+# [source.auth]
+# type = "bearer"
+# token = "my-api-token"
+
+[[output_channel]]
+name = "Morning Tech Digest"
+slug = "tech-digest"
+schedule = "at:08:00"
+model = "opencode/big-pickle"
+sources = ["Hacker News", "Lobsters"]
+prompt = """
+Write a morning tech digest for a senior software engineer.
+Focus on: systems programming, AI/ML, NixOS, Rust, self-hosting.
+Skip: startup funding, crypto prices, social media drama.
+Add Editor's Notes for any claims that seem dubious.
+Write in English.
+"""
