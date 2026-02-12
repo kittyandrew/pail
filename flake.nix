@@ -78,6 +78,7 @@
           # Tools
           pkgs.alejandra
           opencodePkg
+          pkgs.gh
         ];
       };
     });

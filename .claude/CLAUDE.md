@@ -46,5 +46,6 @@ When reviewing code or auditing the project, **verify claims before reporting th
 ## Git Workflow
 
 - **Never stage or commit without explicit user confirmation.** After making changes, show the diff and wait for the user to approve before running `git add` or `git commit`.
+- **Never push to remote** unless the user explicitly asks in that moment. A one-time push approval does not carry forward to future pushes.
 - **Exception: `.claude/CLAUDE.md`** — always auto-stage this file after editing it.
 - **Never run git commands in the kittyos repo** (`~/dev/kittyos/`). You may edit files there (e.g., the PRD), but never stage, commit, or otherwise touch git in that repo.
