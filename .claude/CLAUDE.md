@@ -11,7 +11,7 @@ The complete PRD lives in the kittyos repo (not this repo):
 ~/dev/kittyos/.notes/personal/pail/pail-prd.md
 ```
 
-Read it before making architectural decisions or adding new features.
+**Always load the PRD into context** at the start of a session (or after context compaction) before making architectural decisions, adding features, or planning implementation work. If it's not in context, read it first.
 
 ## CI / Linting
 

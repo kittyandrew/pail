@@ -1,0 +1,15 @@
+# Build the image first: nix build .#docker && docker load < result
+services:
+  pail:
+    image: pail:0.1.0
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config.toml:/etc/pail/config.toml:ro
+      - ./data/pail:/var/lib/pail
+      - ./data/opencode-auth:/root/.local/share/opencode
+      - ./data/opencode-config:/root/.config/opencode
+    # Option A: pass API keys as env vars (no opencode auth needed)
+    # environment:
+    #   - OPENAI_API_KEY=${OPENAI_API_KEY}
+    #   - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}

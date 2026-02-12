@@ -16,6 +16,9 @@ pub struct Source {
     pub auth_token: Option<String>,
     pub auth_header_name: Option<String>,
     pub auth_header_value: Option<String>,
+    pub last_fetched_at: Option<DateTime<Utc>>,
+    pub last_etag: Option<String>,
+    pub last_modified_header: Option<String>,
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -60,6 +63,24 @@ pub struct GeneratedArticle {
     pub body_html: String,
     pub body_markdown: String,
     pub content_item_ids: Vec<String>,
+    pub generation_log: String,
+    pub model_used: String,
+    pub token_count: Option<i64>,
+}
+
+/// Read model for articles from DB (used by Atom feed builder).
+#[derive(Debug, Clone, FromRow)]
+pub struct GeneratedArticleRow {
+    pub id: String,
+    pub output_channel_id: String,
+    pub generated_at: DateTime<Utc>,
+    pub covers_from: DateTime<Utc>,
+    pub covers_to: DateTime<Utc>,
+    pub title: String,
+    pub topics: String,
+    pub body_html: String,
+    pub body_markdown: String,
+    pub content_item_ids: String,
     pub generation_log: String,
     pub model_used: String,
     pub token_count: Option<i64>,

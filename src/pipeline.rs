@@ -1,0 +1,203 @@
+use std::time::Duration;
+
+use anyhow::{Context, Result};
+use chrono::Utc;
+use sqlx::SqlitePool;
+use tokio_util::sync::CancellationToken;
+use tracing::{error, info, warn};
+
+use crate::config::{Config, OutputChannelConfig};
+use crate::{fetch, generate, models, store};
+
+/// Result of a successful pipeline run.
+pub struct PipelineResult {
+    pub article: models::GeneratedArticle,
+    pub raw_output: String,
+}
+
+/// Run the full generation pipeline for a single output channel.
+///
+/// If `fetch_rss` is true, fetches RSS feeds before generation (CLI mode).
+/// If false, assumes the poller has already fetched content (daemon mode).
+///
+/// Returns `None` if no content items were found (generation skipped).
+pub async fn run_generation(
+    pool: &SqlitePool,
+    config: &Config,
+    channel_config: &OutputChannelConfig,
+    since_override: Option<Duration>,
+    fetch_rss: bool,
+    cancel: CancellationToken,
+) -> Result<Option<PipelineResult>> {
+    let channel = store::get_channel_by_slug(pool, &channel_config.slug)
+        .await
+        .context("looking up output channel")?
+        .ok_or_else(|| anyhow::anyhow!("no output channel with slug '{}'", channel_config.slug))?;
+
+    let source_ids = store::get_channel_source_ids(pool, &channel.id)
+        .await
+        .context("getting channel source IDs")?;
+
+    if source_ids.is_empty() {
+        warn!(channel = %channel.name, "no sources configured for this channel");
+        return Ok(None);
+    }
+
+    let all_sources = store::get_sources_by_ids(pool, &source_ids)
+        .await
+        .context("getting sources")?;
+
+    let sources: Vec<_> = all_sources.into_iter().filter(|s| s.enabled).collect();
+    let source_ids: Vec<String> = sources.iter().map(|s| s.id.clone()).collect();
+
+    if cancel.is_cancelled() {
+        return Ok(None);
+    }
+
+    // Fetch RSS feeds if requested (CLI mode)
+    if fetch_rss {
+        let rss_sources: Vec<_> = sources.iter().filter(|s| s.source_type == "rss").collect();
+        info!(count = rss_sources.len(), "fetching RSS sources");
+
+        for source in &rss_sources {
+            if cancel.is_cancelled() {
+                return Ok(None);
+            }
+            match fetch::fetch_rss_source(source).await {
+                Ok(result) => {
+                    let count = result.items.len();
+                    for item in result.items {
+                        store::upsert_content_item(pool, &item)
+                            .await
+                            .context("storing content item")?;
+                    }
+                    // Save fetch state (ETag, Last-Modified, last_fetched_at) so conditional
+                    // GETs work on subsequent runs and the daemon poller knows when we last fetched
+                    store::update_source_fetch_state(
+                        pool,
+                        &source.id,
+                        Utc::now(),
+                        result.etag.as_deref(),
+                        result.last_modified.as_deref(),
+                    )
+                    .await
+                    .context("updating source fetch state")?;
+                    info!(source = %source.name, items = count, "fetched and stored items");
+                }
+                Err(e) => {
+                    warn!(source = %source.name, error = %e, "failed to fetch source");
+                }
+            }
+        }
+    }
+
+    // Determine time window
+    let now = Utc::now();
+    let since_duration = since_override.map(|d| chrono::Duration::from_std(d).unwrap_or(chrono::Duration::days(7)));
+    let covers_from = if let Some(duration) = since_duration {
+        now - duration
+    } else if let Some(ref last_gen) = channel.last_generated {
+        *last_gen
+    } else {
+        now - chrono::Duration::days(7)
+    };
+
+    info!(
+        from = %covers_from.to_rfc3339(),
+        to = %now.to_rfc3339(),
+        "content time window"
+    );
+
+    let items = store::get_items_in_window(pool, &source_ids, covers_from, now)
+        .await
+        .context("querying content items")?;
+
+    if items.is_empty() {
+        let source_names: Vec<&str> = sources.iter().map(|s| s.name.as_str()).collect();
+        warn!(
+            channel = %channel.name,
+            from = %covers_from.to_rfc3339(),
+            to = %now.to_rfc3339(),
+            sources = ?source_names,
+            "no content items in time window, skipping generation"
+        );
+        // Update last_generated so the next run doesn't re-check this empty window (PRD §9.7)
+        if since_override.is_none() {
+            store::update_last_generated(pool, &channel.id, now)
+                .await
+                .context("updating last_generated")?;
+        }
+        return Ok(None);
+    }
+
+    info!(items = items.len(), "content items collected for generation");
+
+    let source_map: std::collections::HashMap<String, &models::Source> =
+        sources.iter().map(|s| (s.id.clone(), s)).collect();
+
+    if cancel.is_cancelled() {
+        return Ok(None);
+    }
+
+    // Generate with retry
+    let max_retries = config.opencode.max_retries;
+    let mut last_err = None;
+    let mut result = None;
+
+    for attempt in 0..=max_retries {
+        if cancel.is_cancelled() {
+            return Ok(None);
+        }
+        if attempt > 0 {
+            let delay = std::time::Duration::from_secs(30);
+            warn!(attempt, delay_secs = 30, "retrying generation");
+            tokio::select! {
+                _ = cancel.cancelled() => return Ok(None),
+                _ = tokio::time::sleep(delay) => {}
+            }
+        }
+
+        match generate::generate_article(
+            config,
+            channel_config,
+            &channel,
+            &items,
+            &source_map,
+            covers_from,
+            now,
+            cancel.clone(),
+        )
+        .await
+        {
+            Ok(r) => {
+                result = Some(r);
+                break;
+            }
+            Err(e) => {
+                error!(attempt, error = %e, "generation failed");
+                last_err = Some(e);
+            }
+        }
+    }
+
+    let (article, raw_output) = match result {
+        Some(r) => r,
+        None => return Err(last_err.unwrap().context("generation failed after all retries")),
+    };
+
+    // Store article
+    store::insert_generated_article(pool, &article)
+        .await
+        .context("storing generated article")?;
+
+    // Update last_generated (skip for --since overrides)
+    if since_override.is_none() {
+        store::update_last_generated(pool, &channel.id, now)
+            .await
+            .context("updating last_generated")?;
+    }
+
+    info!(title = %article.title, "article generated successfully");
+
+    Ok(Some(PipelineResult { article, raw_output }))
+}

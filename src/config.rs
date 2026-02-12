@@ -33,6 +33,9 @@ pub struct PailConfig {
     pub log_level: String,
     #[serde(default = "default_max_concurrent")]
     pub max_concurrent_generations: u32,
+    #[serde(default = "default_listen")]
+    pub listen: String,
+    pub feed_token: Option<String>,
 }
 
 fn default_version() -> u32 {
@@ -52,6 +55,9 @@ fn default_log_level() -> String {
 }
 fn default_max_concurrent() -> u32 {
     1
+}
+fn default_listen() -> String {
+    "0.0.0.0:8080".to_string()
 }
 
 #[derive(Debug, Deserialize)]
@@ -189,6 +195,18 @@ pub fn validate_config(config: &Config) -> Result<()> {
             config.pail.version
         ))
         .into());
+    }
+
+    // Validate source names contain at least one alphanumeric character
+    // (needed for workspace directory slug generation — all-punctuation names produce empty slugs)
+    for source in &config.source {
+        if !source.name.chars().any(|c| c.is_alphanumeric()) {
+            return Err(ConfigError::Validation(format!(
+                "source '{}': name must contain at least one alphanumeric character",
+                source.name
+            ))
+            .into());
+        }
     }
 
     // Validate source types
@@ -377,8 +395,12 @@ fn validate_schedule(schedule: &str) -> Result<(), String> {
         }
         validate_time(parts[1].trim())?;
         Ok(())
-    } else if schedule.starts_with("cron:") {
-        // Accept cron expressions without deep validation
+    } else if let Some(expr) = schedule.strip_prefix("cron:") {
+        // Validate by parsing with the cron crate (7-field: prepend seconds, append year)
+        let cron_expr = format!("0 {expr} *");
+        cron_expr
+            .parse::<cron::Schedule>()
+            .map_err(|e| format!("invalid cron expression '{expr}': {e}"))?;
         Ok(())
     } else {
         Err(format!(

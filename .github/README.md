@@ -1,0 +1,131 @@
+# pail — Personal AI Lurker
+
+A self-hosted service that monitors RSS feeds (and eventually Telegram channels), generates AI digest articles via [opencode](https://opencode.ai), and publishes them as Atom feeds.
+
+## Quick Start
+
+### Prerequisites
+
+- [Nix](https://nixos.org/download/) with flakes enabled
+- An LLM provider API key (or use the free `opencode/big-pickle` model)
+
+### Development
+
+```bash
+nix develop          # enters shell with Rust toolchain, opencode, etc.
+cargo build          # build
+cargo clippy         # lint
+cargo test           # test
+cargo fmt --check    # format check
+```
+
+### Configuration
+
+Copy the example config and edit it:
+
+```bash
+cp config.example.toml config.toml
+```
+
+Key sections:
+- `[[source]]` — define RSS feeds to monitor
+- `[[output_channel]]` — define digest channels with schedule, prompt, and source list
+- `[opencode]` — LLM model and binary path
+
+See `config.example.toml` for all options with comments.
+
+### CLI Usage
+
+```bash
+# Validate config
+pail validate
+
+# Generate a digest (one-shot, fetches RSS + invokes opencode)
+pail generate tech-digest --output ./digest.md
+
+# Re-generate with a custom time window (useful for prompt iteration)
+pail generate tech-digest --since 7d --output ./digest.md
+```
+
+### Daemon Mode
+
+Run without a subcommand to start the daemon (scheduler + RSS poller + Atom feed server):
+
+```bash
+pail --config config.toml
+```
+
+The daemon:
+- Polls RSS feeds at configured intervals
+- Generates digests on schedule (e.g., `at:08:00,20:00`)
+- Serves Atom feeds at `http://localhost:8080/feed/default/<slug>.atom`
+
+### Feed Authentication
+
+Feeds require a token. On first run, a token is auto-generated and logged once:
+
+```
+WARN feed token generated: <token> — save this, it won't be shown again
+```
+
+Access feeds with either:
+- Query param: `http://localhost:8080/feed/default/tech-digest.atom?token=<token>`
+- HTTP Basic Auth: `http://user:<token>@localhost:8080/feed/default/tech-digest.atom`
+
+To set a fixed token, add `feed_token = "my-secret"` to the `[pail]` config section.
+
+## Docker
+
+Build the image with Nix and load it:
+
+```bash
+nix build .#docker && docker load < result
+```
+
+Run with docker-compose:
+
+```bash
+# Create data directories
+mkdir -p data/pail data/opencode-auth data/opencode-config
+
+# Copy and edit config — set data_dir to match the Docker volume mount
+cp config.example.toml config.toml
+# In config.toml, change: data_dir = "/var/lib/pail"
+
+# Authenticate opencode (one-time, interactive)
+docker-compose run --rm -it pail opencode auth login
+
+# Start the service
+docker-compose up -d
+```
+
+Alternatively, pass API keys as environment variables (see `docker-compose.yml`).
+
+## Reverse Proxy
+
+pail's built-in HTTP server is designed to sit behind a reverse proxy. Set `listen = "127.0.0.1:8080"` in your config so pail only accepts local connections, and let the proxy handle TLS.
+
+[Caddy](https://caddyserver.com/) is recommended — automatic HTTPS with zero config:
+
+```caddyfile
+pail.kittyandrew.dev {
+	reverse_proxy localhost:8080
+}
+```
+
+Feed readers can then subscribe to `https://pail.kittyandrew.dev/feed/default/<slug>.atom?token=<token>`.
+
+## Schedule Formats
+
+```toml
+schedule = "at:08:00"                  # once daily at 08:00
+schedule = "at:08:00,20:00"            # twice daily
+schedule = "weekly:monday,08:00"       # weekly on Monday
+schedule = "cron:0 8 * * *"            # 5-field cron expression (always UTC)
+```
+
+`at:` and `weekly:` times are interpreted in the configured `timezone` (default: UTC). Cron expressions always evaluate in UTC.
+
+## License
+
+[AGPL-3.0](../LICENSE)

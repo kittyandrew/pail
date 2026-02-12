@@ -10,6 +10,7 @@ clap = { version = "4", features = ["derive"] }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["rt"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -24,17 +25,26 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
 
+# HTTP server
+axum = "0.8"
+
 # HTTP client
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 
-# Feed parsing
+# Feed parsing (input)
 feed-rs = "2"
+
+# Feed generation (output)
+atom_syndication = "0.12"
 
 # Markdown
 pulldown-cmark = "0.12"
 
 # YAML frontmatter
 gray_matter = "0.2"
+
+# Cron expressions
+cron = "0.15"
 
 # Duration parsing
 humantime = "2"
@@ -53,8 +63,14 @@ base64 = "0.22"
 # Hashing
 sha2 = "0.10"
 
+# Constant-time comparison
+subtle = "2"
+
 # HTML to text
 html2text = "0.14"
+
+# Random token generation
+rand = "0.9"
 
 # Temp directories
 tempfile = "3"

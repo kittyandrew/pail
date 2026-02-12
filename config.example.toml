@@ -1,47 +1,147 @@
+# pail — Personal AI Lurker
+# Reference configuration with all options documented.
+# Copy to config.toml and edit. Commented-out values show defaults.
+
 [pail]
+# Config format version (must be 1)
 version = 1
-data_dir = "./data"
-retention = "7d"
-timezone = "Europe/Kyiv"
-log_level = "info"
-max_concurrent_generations = 1
+
+# Directory for database and other persistent data
+# data_dir = "./data"
+
+# How long to keep fetched content items before cleanup deletes them
+# Accepts human-readable durations: "7d", "30d", "2w", "168h"
+# retention = "7d"
+
+# IANA timezone for schedule evaluation (e.g., "UTC", "America/New_York", "Europe/Berlin")
+# timezone = "UTC"
+
+# Log level: "trace", "debug", "info", "warn", "error"
+# log_level = "info"
+
+# Maximum number of digest generations that can run simultaneously
+# max_concurrent_generations = 1
+
+# HTTP bind address for the Atom feed server (daemon mode)
+# listen = "0.0.0.0:8080"
+
+# Feed authentication token. If omitted, a random token is auto-generated
+# on first daemon start and logged once at WARN level. Set explicitly for
+# reproducible deployments or to share across restarts without DB state.
+# feed_token = "my-secret-token"
+
 
 [database]
-path = "pail.db"
+# Database filename, resolved relative to data_dir unless absolute
+# path = "pail.db"
+
 
 [opencode]
-binary = "opencode"
-default_model = "opencode/big-pickle"
-timeout = "10m"
-max_retries = 1
-# extra_args = ["--format", "json"]   # additional flags passed to `opencode run`
+# Path to the opencode binary
+# binary = "opencode"
+
+# Default LLM model for generation (used when output_channel doesn't specify one)
+# See your opencode provider for available models.
+# default_model = "opencode/big-pickle"
+
+# Maximum time to wait for opencode to complete a generation
+# Accepts human-readable durations: "10m", "30m", "1h"
+# timeout = "10m"
+
+# Number of retry attempts after a failed generation (0 = no retries)
+# max_retries = 1
+
+# Additional CLI flags passed to `opencode run` (e.g., ["--format", "json"])
+# extra_args = []
+
+
+# ┌─────────────────────────────────────────────────────────────────────┐
+# │ Sources                                                             │
+# │                                                                     │
+# │ Each [[source]] defines an input feed to monitor.                   │
+# │ Supported types: "rss" (Phase 1), "telegram_channel",              │
+# │ "telegram_group", "telegram_folder" (planned Phase 2).             │
+# └─────────────────────────────────────────────────────────────────────┘
 
 [[source]]
 name = "Hacker News"
 type = "rss"
 url = "https://hnrss.org/frontpage"
-poll_interval = "15m"
+# How often the daemon polls this feed. Accepts: "15m", "1h", "30m", etc.
+# poll_interval = "30m"
+# Maximum number of items to store per fetch
+# max_items = 200
+# Set to false to temporarily disable this source without removing it
+# enabled = true
 
 [[source]]
 name = "Lobsters"
 type = "rss"
 url = "https://lobste.rs/rss"
 
-# Example: authenticated RSS feed
+# Example: authenticated RSS feed (HTTP Basic Auth)
 # [[source]]
-# name = "Private Feed"
+# name = "Private Feed (Basic)"
 # type = "rss"
 # url = "https://example.com/feed.xml"
+# [source.auth]
+# type = "basic"
+# username = "user"
+# password = "secret"
+
+# Example: authenticated RSS feed (Bearer token)
+# [[source]]
+# name = "Private Feed (Bearer)"
+# type = "rss"
+# url = "https://example.com/api/feed"
 # [source.auth]
 # type = "bearer"
 # token = "my-api-token"
 
+# Example: authenticated RSS feed (custom header)
+# [[source]]
+# name = "Private Feed (Header)"
+# type = "rss"
+# url = "https://example.com/feed.xml"
+# [source.auth]
+# type = "header"
+# header_name = "X-API-Key"
+# header_value = "my-api-key"
+
+
+# ┌─────────────────────────────────────────────────────────────────────┐
+# │ Output Channels                                                     │
+# │                                                                     │
+# │ Each [[output_channel]] defines a digest feed that combines         │
+# │ content from one or more sources, generates articles on schedule,   │
+# │ and serves them as an Atom feed at:                                 │
+# │   /feed/default/<slug>.atom                                         │
+# └─────────────────────────────────────────────────────────────────────┘
+
 [[output_channel]]
 name = "Morning Tech Digest"
+# URL-safe identifier: lowercase letters, digits, and hyphens only.
+# Must not start or end with a hyphen.
 slug = "tech-digest"
+# Schedule for automatic generation in daemon mode.
+# Formats:
+#   "at:08:00"              — daily at 08:00
+#   "at:08:00,20:00"        — twice daily
+#   "weekly:monday,08:00"   — weekly on a specific day
+#   "cron:0 8 * * *"        — 5-field cron expression (evaluated in UTC, not timezone)
+# Times for "at:" and "weekly:" are evaluated in the configured timezone.
+# Cron expressions always evaluate in UTC.
 schedule = "at:08:00"
-model = "opencode/big-pickle"
+# LLM model override for this channel (falls back to opencode.default_model)
+# model = "anthropic/claude-sonnet-4-5"
+# Language hint passed to the generation prompt
+# language = "en"
+# Set to false to temporarily disable this channel without removing it
+# enabled = true
+# Source names (must match [[source]] name values exactly)
 sources = ["Hacker News", "Lobsters"]
+# Editorial directive — controls what the AI writes about and how.
+# This is the primary knob for tuning digest output.
 prompt = """
 Write a morning tech digest for a senior software engineer.
 Focus on: systems programming, AI/ML, NixOS, Rust, self-hosting.

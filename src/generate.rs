@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use gray_matter::Matter;
 use gray_matter::engine::YAML;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -16,6 +17,7 @@ const MAX_SOURCE_FILE_CHARS: usize = 50_000;
 
 /// Generate a digest article for a channel.
 /// Returns (article, raw_output) where raw_output is the exact content of output.md.
+#[allow(clippy::too_many_arguments)]
 pub async fn generate_article(
     config: &Config,
     channel_config: &OutputChannelConfig,
@@ -24,6 +26,7 @@ pub async fn generate_article(
     source_map: &HashMap<String, &Source>,
     covers_from: DateTime<Utc>,
     covers_to: DateTime<Utc>,
+    cancel: CancellationToken,
 ) -> Result<(GeneratedArticle, String)> {
     // Create workspace
     let workspace = tempfile::Builder::new()
@@ -76,6 +79,7 @@ pub async fn generate_article(
         model,
         &config.opencode.timeout,
         &config.opencode.extra_args,
+        cancel,
     )
     .await
     .context("invoking opencode")?;
@@ -228,6 +232,22 @@ All input data is in the current directory:
 6. Write the final article to `output.md`.
 7. Re-read your output and iterate if the quality is insufficient.
 
+## Condensation and Fidelity
+As source volume grows, you will need to condense more aggressively. This is expected —
+a digest covering 200 articles cannot give each one a full paragraph. However:
+- **Preserve the author's intent.** Condensation must retain the core argument, key evidence,
+  and nuance of each piece. If an article's point is subtle or counterintuitive, make sure
+  that subtlety survives the summary. Do not flatten complex arguments into generic platitudes.
+- **Stay specific.** A condensed section should still contain concrete details: names, numbers,
+  mechanisms, conclusions. "Researchers found interesting results" is useless. "MIT researchers
+  showed 40% latency reduction using speculative decoding on Llama 3" is a digest.
+- **Do not mislead by omission.** If condensing forces you to drop important caveats or
+  counter-arguments, either keep them or skip the article entirely rather than presenting
+  a misleading one-sided summary.
+- **Scale gracefully.** With few articles, write thorough sections. With many, write tighter
+  summaries but never sacrifice clarity for brevity. The reader should understand *why*
+  something matters, not just *that* it happened.
+
 ## RSS Sources
 - Source content files contain RSS summaries or excerpts, not the full text.
 - **IMPORTANT: Fetch full articles.** For every item that has a **Link** URL,
@@ -271,11 +291,24 @@ Write `output.md` with YAML frontmatter followed by the article body:
   with the link and a one-line reason why it was excluded
 
 ## Editor's Notes
-There are two types of editor's notes. Use both where appropriate:
+There are two types of editor's notes. Use both where appropriate.
+
+**Tone and Framework:** Editor's notes are written in a distinctly different voice from
+the main digest. The main body reports and synthesizes — editor's notes *assess*. Adopt
+a rationalist epistemological framework: verified evidence and trusted primary sources
+always take priority over pure reasoning. However, when no external source is available
+or the point does not require one, clear logical reasoning from established premises is
+the next best tool — and is far better than leaving a dubious claim unchallenged. State
+your epistemic basis explicitly: "data from X shows..." vs "reasoning from Y, we would
+expect..." so the reader can calibrate trust accordingly.
 
 1. **Fact-checking blockquotes:** If a post makes bold or original claims, add
    `> **Editor's Note:**` blockquotes with your assessment. Be firm and fair.
    Consider fact-checking a key part of your job, not just parroting articles.
+   When evidence exists, cite it — link to the study, the dataset, the counter-argument.
+   When it does not, reason clearly from what is known and flag the uncertainty.
+   If the claim is plausible but unverified, say so and explain what evidence
+   would confirm or refute it.
 
 2. **Inline annotations:** If a post contains specialized language, commonly confused
    or unusual terms, add an inline editor's note explaining what it actually means.
@@ -298,6 +331,18 @@ There are two types of editor's notes. Use both where appropriate:
   than leaving them as a separate list
 - When an article mentions a specific claim with a source, link directly to that source,
   not just to the article making the claim
+
+## Link Verification — CRITICAL
+**NEVER include a URL you have not verified.** Every hyperlink in the article — whether
+in the main body, editor's notes, or inline annotations — must be either:
+1. A URL that appeared in the source content files (already verified by pail), OR
+2. A URL you have fetched yourself during this session and confirmed returns real content
+
+If you want to reference something in an editor's note (a study, a dataset, a counter-argument),
+you MUST fetch the URL first to confirm it exists and says what you claim it says. If you cannot
+find a working URL, either omit the reference or state the claim without a link and note that
+you could not locate a primary source. A fabricated link is worse than no link — it destroys
+reader trust in the entire digest.
 
 ## Writing Style
 - Write like a Reuters correspondent. Avoid typical AI-smell like em-dash saturation
@@ -434,6 +479,7 @@ async fn invoke_opencode(
     model: &str,
     timeout_str: &str,
     extra_args: &[String],
+    cancel: CancellationToken,
 ) -> Result<(String, Option<i32>)> {
     let timeout = humantime::parse_duration(timeout_str).context("parsing opencode timeout")?;
 
@@ -449,6 +495,7 @@ async fn invoke_opencode(
 
     let mut cmd = tokio::process::Command::new(binary);
     cmd.arg("run")
+        .arg("--share")
         .arg("--model")
         .arg(model)
         .args(extra_args)
@@ -457,39 +504,92 @@ async fn invoke_opencode(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
 
-    let result = tokio::time::timeout(timeout, cmd.output()).await;
-
-    match result {
-        Ok(Ok(output)) => {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let log = format!("=== STDOUT ===\n{stdout}\n=== STDERR ===\n{stderr}");
-            let exit_code = output.status.code();
-
-            if !output.status.success() {
-                warn!(
-                    exit_code = ?exit_code,
-                    stderr = %stderr.chars().take(500).collect::<String>(),
-                    "opencode exited with error"
-                );
-            }
-
-            Ok((log, exit_code))
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(GenerationError::OpencodeBinaryNotFound(binary.to_string()).into());
         }
-        Ok(Err(e)) => {
-            // Check if binary not found
-            if e.kind() == std::io::ErrorKind::NotFound {
-                Err(GenerationError::OpencodeBinaryNotFound(binary.to_string()).into())
-            } else {
-                Err(GenerationError::OpencodeExecution {
+        Err(e) => {
+            return Err(GenerationError::OpencodeExecution {
+                exit_code: None,
+                stderr: e.to_string(),
+            }
+            .into());
+        }
+    };
+
+    // Take stdout/stderr handles so we can read them after wait/kill
+    let child_stdout = child.stdout.take();
+    let child_stderr = child.stderr.take();
+
+    // Wait for completion, timeout, or cancellation (PRD §9.9: kill subprocess on shutdown)
+    tokio::select! {
+        r = tokio::time::timeout(timeout, child.wait()) => {
+            match r {
+                Ok(Ok(status)) => {
+                    let (stdout, stderr) = read_child_pipes(child_stdout, child_stderr).await;
+                    let log = format!("=== STDOUT ===\n{stdout}\n=== STDERR ===\n{stderr}");
+                    let exit_code = status.code();
+                    if !status.success() {
+                        warn!(
+                            exit_code = ?exit_code,
+                            stderr = %stderr.chars().take(500).collect::<String>(),
+                            "opencode exited with error"
+                        );
+                    }
+                    Ok((log, exit_code))
+                }
+                Ok(Err(e)) => Err(GenerationError::OpencodeExecution {
                     exit_code: None,
                     stderr: e.to_string(),
+                }.into()),
+                Err(_) => {
+                    warn!("opencode timed out, killing subprocess");
+                    let _ = child.kill().await;
+                    let _ = child.wait().await;
+                    let (stdout, stderr) = read_child_pipes(child_stdout, child_stderr).await;
+                    let partial_log = format!("=== STDOUT (partial) ===\n{stdout}\n=== STDERR (partial) ===\n{stderr}");
+                    Err(GenerationError::Timeout(
+                        format!("{timeout_str}. Partial log:\n{partial_log}")
+                    ).into())
                 }
-                .into())
             }
         }
-        Err(_) => Err(GenerationError::Timeout(timeout_str.to_string()).into()),
+        _ = cancel.cancelled() => {
+            warn!("generation cancelled, killing opencode subprocess");
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            let (stdout, stderr) = read_child_pipes(child_stdout, child_stderr).await;
+            let partial_log = format!("=== STDOUT (partial) ===\n{stdout}\n=== STDERR (partial) ===\n{stderr}");
+            Err(GenerationError::OpencodeExecution {
+                exit_code: None,
+                stderr: format!("cancelled during shutdown. Partial log:\n{partial_log}"),
+            }.into())
+        }
     }
+}
+
+async fn read_child_pipes(
+    stdout: Option<tokio::process::ChildStdout>,
+    stderr: Option<tokio::process::ChildStderr>,
+) -> (String, String) {
+    use tokio::io::AsyncReadExt;
+
+    let stdout_str = if let Some(mut out) = stdout {
+        let mut buf = Vec::new();
+        let _ = out.read_to_end(&mut buf).await;
+        String::from_utf8_lossy(&buf).to_string()
+    } else {
+        String::new()
+    };
+    let stderr_str = if let Some(mut err) = stderr {
+        let mut buf = Vec::new();
+        let _ = err.read_to_end(&mut buf).await;
+        String::from_utf8_lossy(&buf).to_string()
+    } else {
+        String::new()
+    };
+    (stdout_str, stderr_str)
 }
 
 fn parse_output(content: &str) -> Result<(String, Vec<String>, String)> {

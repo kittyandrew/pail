@@ -5,7 +5,7 @@ use tracing::debug;
 use uuid::Uuid;
 
 use crate::config::Config;
-use crate::models::{ContentItem, GeneratedArticle, OutputChannel, Source};
+use crate::models::{ContentItem, GeneratedArticle, GeneratedArticleRow, OutputChannel, Source};
 
 /// Upsert a source by name — insert or update if it already exists.
 pub async fn upsert_source(pool: &SqlitePool, source: &crate::config::SourceConfig) -> Result<String> {
@@ -258,7 +258,7 @@ pub async fn get_sources_by_ids(pool: &SqlitePool, ids: &[String]) -> Result<Vec
     let placeholders: Vec<&str> = ids.iter().map(|_| "?").collect();
     let query = format!(
         "SELECT id, source_type, name, enabled, url, poll_interval, max_items,
-         auth_type, auth_username, auth_password, auth_token, auth_header_name, auth_header_value
+         auth_type, auth_username, auth_password, auth_token, auth_header_name, auth_header_value, last_fetched_at, last_etag, last_modified_header
          FROM sources WHERE id IN ({})",
         placeholders.join(", ")
     );
@@ -375,4 +375,114 @@ pub async fn update_last_generated(pool: &SqlitePool, channel_id: &str, timestam
         .context("updating last_generated")?;
 
     Ok(())
+}
+
+/// Read a setting from the settings table.
+pub async fn get_setting(pool: &SqlitePool, key: &str) -> Result<Option<String>> {
+    let row: Option<(String,)> = sqlx::query_as("SELECT value FROM settings WHERE key = ?")
+        .bind(key)
+        .fetch_optional(pool)
+        .await
+        .context("reading setting")?;
+    Ok(row.map(|(v,)| v))
+}
+
+/// Upsert a setting in the settings table.
+pub async fn set_setting(pool: &SqlitePool, key: &str, value: &str) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+    )
+    .bind(key)
+    .bind(value)
+    .execute(pool)
+    .await
+    .context("upserting setting")?;
+    Ok(())
+}
+
+/// Get a source by name.
+pub async fn get_source_by_name(pool: &SqlitePool, name: &str) -> Result<Option<Source>> {
+    let source = sqlx::query_as::<_, Source>(
+        "SELECT id, source_type, name, enabled, url, poll_interval, max_items,
+         auth_type, auth_username, auth_password, auth_token, auth_header_name, auth_header_value, last_fetched_at, last_etag, last_modified_header
+         FROM sources WHERE name = ?",
+    )
+    .bind(name)
+    .fetch_optional(pool)
+    .await
+    .context("querying source by name")?;
+    Ok(source)
+}
+
+/// Update fetch state on a source: last_fetched_at, ETag, and Last-Modified.
+pub async fn update_source_fetch_state(
+    pool: &SqlitePool,
+    source_id: &str,
+    timestamp: DateTime<Utc>,
+    etag: Option<&str>,
+    last_modified: Option<&str>,
+) -> Result<()> {
+    sqlx::query("UPDATE sources SET last_fetched_at = ?, last_etag = ?, last_modified_header = ? WHERE id = ?")
+        .bind(timestamp.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+        .bind(etag)
+        .bind(last_modified)
+        .bind(source_id)
+        .execute(pool)
+        .await
+        .context("updating source fetch state")?;
+    Ok(())
+}
+
+/// Delete content items older than the cutoff. Returns number of deleted rows.
+pub async fn delete_old_content_items(pool: &SqlitePool, cutoff: DateTime<Utc>) -> Result<u64> {
+    let result = sqlx::query("DELETE FROM content_items WHERE ingested_at < ?")
+        .bind(cutoff.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+        .execute(pool)
+        .await
+        .context("deleting old content items")?;
+    Ok(result.rows_affected())
+}
+
+/// Get recent generated articles for an output channel (for Atom feed).
+pub async fn get_recent_articles(pool: &SqlitePool, channel_id: &str, limit: i64) -> Result<Vec<GeneratedArticleRow>> {
+    let articles = sqlx::query_as::<_, GeneratedArticleRow>(
+        "SELECT id, output_channel_id, generated_at, covers_from, covers_to,
+         title, topics, body_html, body_markdown, content_item_ids, generation_log, model_used, token_count
+         FROM generated_articles
+         WHERE output_channel_id = ?
+         ORDER BY generated_at DESC
+         LIMIT ?",
+    )
+    .bind(channel_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .context("querying recent articles")?;
+    Ok(articles)
+}
+
+/// Get all enabled output channels.
+pub async fn get_all_enabled_channels(pool: &SqlitePool) -> Result<Vec<OutputChannel>> {
+    let channels = sqlx::query_as::<_, OutputChannel>(
+        "SELECT id, name, slug, schedule, prompt, model, language, enabled, last_generated
+         FROM output_channels WHERE enabled = 1",
+    )
+    .fetch_all(pool)
+    .await
+    .context("querying enabled output channels")?;
+    Ok(channels)
+}
+
+/// Get all enabled sources.
+pub async fn get_all_enabled_sources(pool: &SqlitePool) -> Result<Vec<Source>> {
+    let sources = sqlx::query_as::<_, Source>(
+        "SELECT id, source_type, name, enabled, url, poll_interval, max_items,
+         auth_type, auth_username, auth_password, auth_token, auth_header_name, auth_header_value, last_fetched_at, last_etag, last_modified_header
+         FROM sources WHERE enabled = 1",
+    )
+    .fetch_all(pool)
+    .await
+    .context("querying enabled sources")?;
+    Ok(sources)
 }
