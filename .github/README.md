@@ -113,13 +113,13 @@ cp config.example.toml config.toml
 # In config.toml, change: data_dir = "/var/lib/pail"
 
 # Authenticate opencode (one-time, interactive)
-docker-compose run --rm -it pail opencode auth login
+docker compose run --rm -it pail opencode auth login
 
 # Authenticate Telegram (one-time, if using TG sources)
-docker-compose run --rm -it pail tg login
+docker compose run --rm -it pail tg login
 
 # Start the service
-docker-compose up -d
+docker compose up -d
 ```
 
 Alternatively, pass API keys as environment variables (see `docker-compose.yml`).
