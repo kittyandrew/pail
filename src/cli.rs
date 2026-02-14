@@ -31,4 +31,18 @@ pub enum Commands {
         #[arg(long)]
         since: Option<String>,
     },
+
+    /// Telegram session management
+    Tg {
+        #[command(subcommand)]
+        command: TgCommands,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum TgCommands {
+    /// Interactive MTProto login wizard
+    Login,
+    /// Show Telegram session status
+    Status,
 }

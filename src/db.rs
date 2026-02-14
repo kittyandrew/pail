@@ -14,6 +14,16 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
         include_str!("../migrations/20260211_000001_initial_schema.sql"),
     ),
     (2, "phase1b", include_str!("../migrations/20260211_000002_phase1b.sql")),
+    (
+        3,
+        "phase2_telegram",
+        include_str!("../migrations/20260212_000003_phase2_telegram.sql"),
+    ),
+    (
+        4,
+        "workspace_improvements",
+        include_str!("../migrations/20260213_000004_workspace_improvements.sql"),
+    ),
 ];
 
 pub async fn create_pool(config: &Config) -> Result<SqlitePool> {

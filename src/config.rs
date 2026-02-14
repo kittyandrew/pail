@@ -14,6 +14,8 @@ pub struct Config {
     #[serde(default)]
     pub opencode: OpencodeConfig,
     #[serde(default)]
+    pub telegram: TelegramConfig,
+    #[serde(default)]
     pub source: Vec<SourceConfig>,
     #[serde(default)]
     pub output_channel: Vec<OutputChannelConfig>,
@@ -90,6 +92,8 @@ pub struct OpencodeConfig {
     pub max_retries: u32,
     #[serde(default)]
     pub extra_args: Vec<String>,
+    #[serde(default)]
+    pub system_prompt: String,
 }
 
 impl Default for OpencodeConfig {
@@ -100,8 +104,17 @@ impl Default for OpencodeConfig {
             timeout: default_timeout(),
             max_retries: default_max_retries(),
             extra_args: Vec::new(),
+            system_prompt: String::new(),
         }
     }
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct TelegramConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    pub api_id: Option<i32>,
+    pub api_hash: Option<String>,
 }
 
 fn default_opencode_binary() -> String {
@@ -125,8 +138,15 @@ pub struct SourceConfig {
     #[serde(default = "default_max_items")]
     pub max_items: u32,
     pub auth: Option<SourceAuthConfig>,
+    // Telegram-specific fields
+    pub tg_id: Option<i64>,
+    pub tg_username: Option<String>,
+    pub tg_folder_name: Option<String>,
+    #[serde(default)]
+    pub exclude: Option<Vec<String>>,
     #[serde(default = "default_enabled")]
     pub enabled: Option<bool>,
+    pub description: Option<String>,
 }
 
 fn default_poll_interval() -> String {
@@ -159,6 +179,8 @@ pub struct OutputChannelConfig {
     pub prompt: String,
     pub model: Option<String>,
     pub language: Option<String>,
+    #[serde(default)]
+    pub mark_tg_read: Option<bool>,
     #[serde(default = "default_channel_enabled")]
     pub enabled: Option<bool>,
 }
@@ -197,13 +219,34 @@ pub fn validate_config(config: &Config) -> Result<()> {
         .into());
     }
 
-    // Validate source names contain at least one alphanumeric character
-    // (needed for workspace directory slug generation — all-punctuation names produce empty slugs)
+    // Validate source names: alphanumeric, spaces, hyphens, underscores, dots, parentheses.
+    // Must contain at least one alphanumeric (for slug generation).
     for source in &config.source {
         if !source.name.chars().any(|c| c.is_alphanumeric()) {
             return Err(ConfigError::Validation(format!(
                 "source '{}': name must contain at least one alphanumeric character",
                 source.name
+            ))
+            .into());
+        }
+        if let Some(bad) = source
+            .name
+            .chars()
+            .find(|c| !c.is_alphanumeric() && !" -_.()&,+'".contains(*c))
+        {
+            return Err(ConfigError::Validation(format!(
+                "source '{}': name contains invalid character {:?} (allowed: letters, digits, spaces, - _ . ( ) & , + ')",
+                source.name, bad
+            ))
+            .into());
+        }
+        if let Some(ref desc) = source.description
+            && let Some(bad) = desc.chars().find(|c| c.is_control() || *c == '"' || *c == '\\')
+        {
+            return Err(ConfigError::Validation(format!(
+                "source '{}': description contains disallowed character {:?} \
+                 (control characters, double quotes, and backslashes are not allowed)",
+                source.name, bad
             ))
             .into());
         }
@@ -221,8 +264,23 @@ pub fn validate_config(config: &Config) -> Result<()> {
                     .into());
                 }
             }
-            "telegram_channel" | "telegram_group" | "telegram_folder" => {
-                // TG sources not supported in Phase 1a, but don't reject them
+            "telegram_channel" | "telegram_group" => {
+                if source.tg_username.is_none() && source.tg_id.is_none() {
+                    return Err(ConfigError::Validation(format!(
+                        "source '{}': {} source must have 'tg_username' or 'tg_id'",
+                        source.name, source.source_type
+                    ))
+                    .into());
+                }
+            }
+            "telegram_folder" => {
+                if source.tg_folder_name.is_none() {
+                    return Err(ConfigError::Validation(format!(
+                        "source '{}': telegram_folder source must have 'tg_folder_name'",
+                        source.name
+                    ))
+                    .into());
+                }
             }
             other => {
                 return Err(
@@ -299,6 +357,37 @@ pub fn validate_config(config: &Config) -> Result<()> {
         }
     }
 
+    // Validate Telegram config if any TG sources are present
+    let has_tg_sources = config.source.iter().any(|s| s.source_type.starts_with("telegram_"));
+    if has_tg_sources {
+        if !config.telegram.enabled {
+            return Err(ConfigError::Validation(
+                "telegram sources are configured but [telegram].enabled is false".to_string(),
+            )
+            .into());
+        }
+        match config.telegram.api_id {
+            None | Some(0) => {
+                return Err(ConfigError::Validation(
+                    "telegram sources require a valid [telegram].api_id (get one at https://my.telegram.org)"
+                        .to_string(),
+                )
+                .into());
+            }
+            _ => {}
+        }
+        match config.telegram.api_hash.as_deref() {
+            None | Some("") => {
+                return Err(ConfigError::Validation(
+                    "telegram sources require a valid [telegram].api_hash (get one at https://my.telegram.org)"
+                        .to_string(),
+                )
+                .into());
+            }
+            _ => {}
+        }
+    }
+
     // Validate output channels
     let mut channel_slugs = HashSet::new();
     for channel in &config.output_channel {
@@ -353,6 +442,19 @@ pub fn validate_config(config: &Config) -> Result<()> {
         .timezone
         .parse::<chrono_tz::Tz>()
         .map_err(|_| ConfigError::Validation(format!("unknown timezone '{}'", config.pail.timezone)))?;
+
+    // Validate system prompt
+    if config.opencode.system_prompt.trim().is_empty() {
+        return Err(
+            ConfigError::Validation("[opencode].system_prompt is required and must not be empty".to_string()).into(),
+        );
+    }
+    if !config.opencode.system_prompt.contains("{editorial_directive}") {
+        return Err(ConfigError::Validation(
+            "[opencode].system_prompt must contain the {editorial_directive} placeholder".to_string(),
+        )
+        .into());
+    }
 
     // Validate opencode timeout
     humantime::parse_duration(&config.opencode.timeout)

@@ -11,7 +11,7 @@ The complete PRD lives in the kittyos repo (not this repo):
 ~/dev/kittyos/.notes/personal/pail/pail-prd.md
 ```
 
-**Always load the PRD into context** at the start of a session (or after context compaction) before making architectural decisions, adding features, or planning implementation work. If it's not in context, read it first.
+**Always load the PRD into context** at the start of a session, after context compaction, or when continuing from a previous session — before writing ANY implementation code. This is a hard requirement: read the full PRD first, then implement. If the PRD is not in context, stop and read it before proceeding.
 
 ## CI / Linting
 
@@ -42,6 +42,14 @@ When the implementation intentionally diverges from the PRD, **update the spec i
 ## Review Discipline
 
 When reviewing code or auditing the project, **verify claims before reporting them.** Don't assume something is missing based on indirect evidence (e.g., git status snapshots). Check the filesystem directly — glob for files, read them, confirm they exist or don't — before listing an issue.
+
+## Secrets
+
+- **Never read `config.toml`** — it contains real Telegram API credentials. Use `config.example.toml` as reference instead.
+
+## Code Style
+
+- **No imports inside functions or mid-file.** All `use` statements go at the top of the file.
 
 ## Git Workflow
 

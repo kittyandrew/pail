@@ -9,11 +9,11 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
+use tokio::io::AsyncReadExt;
+
 use crate::config::{Config, OutputChannelConfig};
 use crate::error::GenerationError;
 use crate::models::{ContentItem, GeneratedArticle, OutputChannel, Source};
-
-const MAX_SOURCE_FILE_CHARS: usize = 50_000;
 
 /// Generate a digest article for a channel.
 /// Returns (article, raw_output) where raw_output is the exact content of output.md.
@@ -54,7 +54,9 @@ pub async fn generate_article(
     .await
     .context("writing manifest")?;
 
-    write_prompt(ws_path, channel_config).await.context("writing prompt")?;
+    let prompt = write_prompt(ws_path, config, channel_config)
+        .await
+        .context("writing prompt")?;
 
     write_source_content(ws_path, items, source_map, &source_slugs)
         .await
@@ -77,6 +79,7 @@ pub async fn generate_article(
         &config.opencode.binary,
         ws_path,
         model,
+        &prompt,
         &config.opencode.timeout,
         &config.opencode.extra_args,
         cancel,
@@ -209,160 +212,19 @@ async fn write_manifest(
     Ok(())
 }
 
-async fn write_prompt(ws_path: &Path, channel_config: &OutputChannelConfig) -> Result<()> {
-    let prompt_template = format!(
-        r#"You are pail's digest generator. Your job is to read collected content from
-multiple sources and write a single, high-quality digest article.
+async fn write_prompt(ws_path: &Path, config: &Config, channel_config: &OutputChannelConfig) -> Result<String> {
+    let prompt = config
+        .opencode
+        .system_prompt
+        .replace("{editorial_directive}", channel_config.prompt.trim());
 
-## Editorial Directive
-{editorial_directive}
-
-## Workspace
-All input data is in the current directory:
-- `manifest.json` — generation metadata (channel config, time window, source list)
-- `sources/` — subdirectories per source, each with content files
-- `output.md` — write the final article HERE
-
-## Instructions
-1. Follow the editorial directive above closely — it defines the user's preferences.
-2. Read `manifest.json` for the time window, source list, and channel metadata.
-3. Read each source's content files in `sources/`.
-4. Handle each source type according to the rules below (§ RSS Sources, § Telegram Sources).
-5. For large inputs, consider summarizing per-source first, then synthesizing.
-6. Write the final article to `output.md`.
-7. Re-read your output and iterate if the quality is insufficient.
-
-## Condensation and Fidelity
-As source volume grows, you will need to condense more aggressively. This is expected —
-a digest covering 200 articles cannot give each one a full paragraph. However:
-- **Preserve the author's intent.** Condensation must retain the core argument, key evidence,
-  and nuance of each piece. If an article's point is subtle or counterintuitive, make sure
-  that subtlety survives the summary. Do not flatten complex arguments into generic platitudes.
-- **Stay specific.** A condensed section should still contain concrete details: names, numbers,
-  mechanisms, conclusions. "Researchers found interesting results" is useless. "MIT researchers
-  showed 40% latency reduction using speculative decoding on Llama 3" is a digest.
-- **Do not mislead by omission.** If condensing forces you to drop important caveats or
-  counter-arguments, either keep them or skip the article entirely rather than presenting
-  a misleading one-sided summary.
-- **Scale gracefully.** With few articles, write thorough sections. With many, write tighter
-  summaries but never sacrifice clarity for brevity. The reader should understand *why*
-  something matters, not just *that* it happened.
-
-## RSS Sources
-- Source content files contain RSS summaries or excerpts, not the full text.
-- **IMPORTANT: Fetch full articles.** For every item that has a **Link** URL,
-  you MUST fetch the full article from that URL before writing about it. Do not write
-  about an article based only on a title or summary — get the real content first.
-  Skip items where the full content cannot be retrieved.
-
-## Telegram Sources
-- Source content files contain the full message text as collected from the live event stream.
-  No additional fetching is needed — the content is already complete.
-- Link formats differ by chat type:
-  - Public channels/groups (has @username): `https://t.me/<username>/<message_id>`
-  - Private channels/groups (no username): `https://t.me/c/<numeric_id>/<message_id>`
-  - Forum topics: `https://t.me/<username_or_c/id>/<topic_id>/<message_id>`
-- Conversations may be threaded — look for reply chains and group related messages.
-- Media messages (photos, videos, voice) are noted by type but binary content is not included;
-  describe them based on captions and context.
-
-## Output Format
-Write `output.md` with YAML frontmatter followed by the article body:
-
-    ---
-    title: "Your Article Title"
-    topics:
-      - "Topic 1"
-      - "Topic 2"
-    ---
-
-    # Your Article Title
-    ...article body...
-
-## Article Body Format
-- Start with a `# Title` matching the frontmatter title
-- Use `## Sections` to organize by topic, not by source
-- Synthesize related ideas across posts, find connections
-- Use inline links `[text](url)` to reference original articles/messages
-- Link to original articles. Skip anything that's just a short announcement with no substance
-- End with a `## Sources` section listing all referenced sources
-- **Never silently ignore articles.** If you skip an article for any reason (too short,
-  off-topic, couldn't fetch content, etc.), list it in a final `## Skipped` section
-  with the link and a one-line reason why it was excluded
-
-## Editor's Notes
-There are two types of editor's notes. Use both where appropriate.
-
-**Tone and Framework:** Editor's notes are written in a distinctly different voice from
-the main digest. The main body reports and synthesizes — editor's notes *assess*. Adopt
-a rationalist epistemological framework: verified evidence and trusted primary sources
-always take priority over pure reasoning. However, when no external source is available
-or the point does not require one, clear logical reasoning from established premises is
-the next best tool — and is far better than leaving a dubious claim unchallenged. State
-your epistemic basis explicitly: "data from X shows..." vs "reasoning from Y, we would
-expect..." so the reader can calibrate trust accordingly.
-
-1. **Fact-checking blockquotes:** If a post makes bold or original claims, add
-   `> **Editor's Note:**` blockquotes with your assessment. Be firm and fair.
-   Consider fact-checking a key part of your job, not just parroting articles.
-   When evidence exists, cite it — link to the study, the dataset, the counter-argument.
-   When it does not, reason clearly from what is known and flag the uncertainty.
-   If the claim is plausible but unverified, say so and explain what evidence
-   would confirm or refute it.
-
-2. **Inline annotations:** If a post contains specialized language, commonly confused
-   or unusual terms, add an inline editor's note explaining what it actually means.
-   You may also add verified, valid additional references as markdown hyperlinks.
-
-   Examples of where inline notes are useful:
-   - "Meanwhile, OpenAI hired Dylan Scandinaro (formerly X at Y) as Head of
-     Preparedness (OpenAI's team responsible for evaluating catastrophic risks), ..."
-   - "... documents obtained in cooperation with [Dallas](https://dallas-park.com/),
-     a Ukrainian analytical company specializing in leaked Russian documents, ..."
-   - "... systems like the [Koalitsiya](https://en.wikipedia.org/wiki/2S35_Koalitsiya-SV)
-     and [Msta](https://en.wikipedia.org/wiki/2S19_Msta) self-propelled howitzers, ..."
-
-## References and Citations
-- Preserve references to external data, studies, papers, and other sources from the
-  original articles as much as possible. If the original text cites something, keep
-  that citation in the digest with a working link
-- If an article lists references separately (e.g., at the end, in footnotes, or in a
-  bibliography), incorporate them inline into the text as markdown hyperlinks rather
-  than leaving them as a separate list
-- When an article mentions a specific claim with a source, link directly to that source,
-  not just to the article making the claim
-
-## Link Verification — CRITICAL
-**NEVER include a URL you have not verified.** Every hyperlink in the article — whether
-in the main body, editor's notes, or inline annotations — must be either:
-1. A URL that appeared in the source content files (already verified by pail), OR
-2. A URL you have fetched yourself during this session and confirmed returns real content
-
-If you want to reference something in an editor's note (a study, a dataset, a counter-argument),
-you MUST fetch the URL first to confirm it exists and says what you claim it says. If you cannot
-find a working URL, either omit the reference or state the claim without a link and note that
-you could not locate a primary source. A fabricated link is worse than no link — it destroys
-reader trust in the entire digest.
-
-## Writing Style
-- Write like a Reuters correspondent. Avoid typical AI-smell like em-dash saturation
-- Do not address the reader directly. The editor does not know the reader's country,
-  so specify what and who you are talking about, but do not overexplain
-- Tone should reflect confidence in factuality. Do not prefer political leaning
-  over facts and evidence
-- Highlight what is genuinely new or significant
-- Be honest about uncertainty — if something seems unverified, say so
-- Respect the editorial directive's stated interests and ignore topics it asks to skip
-"#,
-        editorial_directive = channel_config.prompt.trim()
-    );
-
-    tokio::fs::write(ws_path.join("prompt.md"), prompt_template)
+    // Write to workspace for debugging/inspection only
+    tokio::fs::write(ws_path.join("prompt.md"), &prompt)
         .await
         .map_err(GenerationError::Workspace)?;
 
     debug!("wrote prompt.md");
-    Ok(())
+    Ok(prompt)
 }
 
 async fn write_source_content(
@@ -378,6 +240,9 @@ async fn write_source_content(
     }
 
     let sources_dir = ws_path.join("sources");
+    tokio::fs::create_dir_all(&sources_dir)
+        .await
+        .map_err(GenerationError::Workspace)?;
 
     for (source_id, source_items) in &items_by_source {
         let source = match source_map.get(*source_id) {
@@ -392,53 +257,29 @@ async fn write_source_content(
             .get(*source_id)
             .cloned()
             .unwrap_or_else(|| slug_from_name(&source.name));
-        let source_dir = sources_dir.join(&slug);
-        tokio::fs::create_dir_all(&source_dir)
+
+        // Build flat file: YAML frontmatter + content items
+        // Source names and descriptions are validated at config load time to contain only
+        // safe characters (no control chars, quotes, or backslashes), so no escaping needed.
+        let description = source.description.as_deref().unwrap_or("");
+        let mut content = format!(
+            "---\nname: \"{}\"\ntype: {}\nitem_count: {}\ndescription: \"{description}\"\n---\n\n",
+            source.name,
+            source.source_type,
+            source_items.len(),
+        );
+
+        for (i, item) in source_items.iter().enumerate() {
+            content.push_str(&format_content_item(item));
+            if i < source_items.len() - 1 {
+                content.push_str("\n---\n\n");
+            }
+        }
+
+        let filename = format!("{slug}.md");
+        tokio::fs::write(sources_dir.join(&filename), &content)
             .await
             .map_err(GenerationError::Workspace)?;
-
-        // Write metadata.json
-        let metadata = serde_json::json!({
-            "name": source.name,
-            "type": source.source_type,
-            "item_count": source_items.len(),
-        });
-        tokio::fs::write(
-            source_dir.join("metadata.json"),
-            serde_json::to_string_pretty(&metadata)?,
-        )
-        .await
-        .map_err(GenerationError::Workspace)?;
-
-        // Build content markdown, splitting if needed
-        let mut content_parts: Vec<String> = Vec::new();
-        let mut current_part = String::new();
-
-        for item in source_items {
-            let item_md = format_content_item(item);
-            if !current_part.is_empty() && current_part.len() + item_md.len() > MAX_SOURCE_FILE_CHARS {
-                content_parts.push(std::mem::take(&mut current_part));
-            }
-            current_part.push_str(&item_md);
-            current_part.push_str("\n---\n\n");
-        }
-        if !current_part.is_empty() {
-            content_parts.push(current_part);
-        }
-
-        // Write content files
-        if content_parts.len() == 1 {
-            tokio::fs::write(source_dir.join("content.md"), &content_parts[0])
-                .await
-                .map_err(GenerationError::Workspace)?;
-        } else {
-            for (i, part) in content_parts.iter().enumerate() {
-                let filename = format!("content_{:03}.md", i + 1);
-                tokio::fs::write(source_dir.join(&filename), part)
-                    .await
-                    .map_err(GenerationError::Workspace)?;
-            }
-        }
 
         debug!(source = %source.name, items = source_items.len(), "wrote source content");
     }
@@ -449,6 +290,16 @@ async fn write_source_content(
 fn format_content_item(item: &ContentItem) -> String {
     let mut md = String::new();
 
+    // Parse metadata for TG-specific fields (message_id, reply_to, forward, media)
+    let meta: serde_json::Value = serde_json::from_str(&item.metadata).unwrap_or_default();
+    let message_id = meta.get("message_id").and_then(|v| v.as_i64());
+    let reply_to = meta.get("reply_to_msg_id").and_then(|v| v.as_i64());
+    let forward_from = meta.get("forward_from").and_then(|v| v.as_str());
+    let forward_from_id = meta.get("forward_from_id").and_then(|v| v.as_i64());
+    let forward_post_author = meta.get("forward_post_author").and_then(|v| v.as_str());
+    let media_type = meta.get("media_type").and_then(|v| v.as_str());
+    let is_forward = item.content_type == "forward";
+
     if let Some(ref title) = item.title {
         md.push_str(&format!("### {title}\n\n"));
     }
@@ -458,8 +309,35 @@ fn format_content_item(item: &ContentItem) -> String {
         item.original_date.format("%Y-%m-%d %H:%M UTC")
     ));
 
+    // For forwards, label the sender as "Forwarded by" to avoid misattribution
     if let Some(ref author) = item.author {
-        md.push_str(&format!("**Author:** {author}\n"));
+        if is_forward {
+            md.push_str(&format!("**Forwarded by:** {author}\n"));
+        } else {
+            md.push_str(&format!("**Author:** {author}\n"));
+        }
+    }
+
+    if let Some(msg_id) = message_id {
+        md.push_str(&format!("**Message ID:** #{msg_id}\n"));
+    }
+
+    if let Some(reply_id) = reply_to {
+        md.push_str(&format!("**Reply to:** #{reply_id}\n"));
+    }
+
+    // Original source of the forward
+    if let Some(fwd) = forward_from {
+        md.push_str(&format!("**Original source:** {fwd}\n"));
+    } else if let Some(fwd_id) = forward_from_id {
+        md.push_str(&format!("**Original source:** [channel/user ID {fwd_id}]\n"));
+    }
+    if let Some(post_author) = forward_post_author {
+        md.push_str(&format!("**Original author:** {post_author}\n"));
+    }
+
+    if let Some(media) = media_type {
+        md.push_str(&format!("**Media:** {media}\n"));
     }
 
     if let Some(ref url) = item.url {
@@ -467,8 +345,15 @@ fn format_content_item(item: &ContentItem) -> String {
     }
 
     md.push('\n');
-    md.push_str(&item.body);
-    md.push('\n');
+
+    if item.body.is_empty() {
+        if let Some(media) = media_type {
+            md.push_str(&format!("[{media} — no caption, see link]\n"));
+        }
+    } else {
+        md.push_str(&item.body);
+        md.push('\n');
+    }
 
     md
 }
@@ -477,14 +362,12 @@ async fn invoke_opencode(
     binary: &str,
     workspace: &Path,
     model: &str,
+    prompt: &str,
     timeout_str: &str,
     extra_args: &[String],
     cancel: CancellationToken,
 ) -> Result<(String, Option<i32>)> {
     let timeout = humantime::parse_duration(timeout_str).context("parsing opencode timeout")?;
-
-    let inline_prompt = "Read prompt.md for your full instructions, then generate a digest article \
-         into output.md using the sources in the workspace.";
 
     info!(
         binary = %binary,
@@ -499,7 +382,8 @@ async fn invoke_opencode(
         .arg("--model")
         .arg(model)
         .args(extra_args)
-        .arg(inline_prompt)
+        .arg("--")
+        .arg(prompt)
         .current_dir(workspace)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
@@ -573,8 +457,6 @@ async fn read_child_pipes(
     stdout: Option<tokio::process::ChildStdout>,
     stderr: Option<tokio::process::ChildStderr>,
 ) -> (String, String) {
-    use tokio::io::AsyncReadExt;
-
     let stdout_str = if let Some(mut out) = stdout {
         let mut buf = Vec::new();
         let _ = out.read_to_end(&mut buf).await;

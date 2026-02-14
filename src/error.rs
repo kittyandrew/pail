@@ -31,3 +31,9 @@ pub enum GenerationError {
     #[error("workspace preparation failed: {0}")]
     Workspace(#[from] std::io::Error),
 }
+
+#[derive(Debug, Error)]
+pub enum TelegramError {
+    #[error("failed to connect to Telegram: {0}")]
+    Connection(String),
+}

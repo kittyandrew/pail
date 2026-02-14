@@ -6,8 +6,10 @@ use sqlx::SqlitePool;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
+use grammers_client::Client;
+
 use crate::config::{Config, OutputChannelConfig};
-use crate::{fetch, generate, models, store};
+use crate::{fetch, fetch_tg, generate, models, store, telegram};
 
 /// Result of a successful pipeline run.
 pub struct PipelineResult {
@@ -17,8 +19,8 @@ pub struct PipelineResult {
 
 /// Run the full generation pipeline for a single output channel.
 ///
-/// If `fetch_rss` is true, fetches RSS feeds before generation (CLI mode).
-/// If false, assumes the poller has already fetched content (daemon mode).
+/// If `fetch_content` is true, fetches RSS feeds and TG history before generation (CLI mode).
+/// If false, assumes the poller/listener has already fetched content (daemon mode).
 ///
 /// Returns `None` if no content items were found (generation skipped).
 pub async fn run_generation(
@@ -26,7 +28,8 @@ pub async fn run_generation(
     config: &Config,
     channel_config: &OutputChannelConfig,
     since_override: Option<Duration>,
-    fetch_rss: bool,
+    fetch_content: bool,
+    tg_client: Option<&Client>,
     cancel: CancellationToken,
 ) -> Result<Option<PipelineResult>> {
     let channel = store::get_channel_by_slug(pool, &channel_config.slug)
@@ -54,8 +57,26 @@ pub async fn run_generation(
         return Ok(None);
     }
 
-    // Fetch RSS feeds if requested (CLI mode)
-    if fetch_rss {
+    // Determine time window (needed before fetching so TG history knows the boundary)
+    let now = Utc::now();
+    let since_duration = since_override.map(|d| chrono::Duration::from_std(d).unwrap_or(chrono::Duration::days(7)));
+    let covers_from = if let Some(duration) = since_duration {
+        now - duration
+    } else if let Some(ref last_gen) = channel.last_generated {
+        *last_gen
+    } else {
+        now - chrono::Duration::days(7)
+    };
+
+    info!(
+        from = %covers_from.to_rfc3339(),
+        to = %now.to_rfc3339(),
+        "content time window"
+    );
+
+    // One-shot content fetching (CLI mode only)
+    if fetch_content {
+        // RSS feeds
         let rss_sources: Vec<_> = sources.iter().filter(|s| s.source_type == "rss").collect();
         info!(count = rss_sources.len(), "fetching RSS sources");
 
@@ -89,24 +110,22 @@ pub async fn run_generation(
                 }
             }
         }
+
+        // TG message history
+        if let Some(client) = tg_client {
+            let tg_sources: Vec<_> = sources
+                .iter()
+                .filter(|s| s.source_type.starts_with("telegram_"))
+                .cloned()
+                .collect();
+            if !tg_sources.is_empty() {
+                info!(count = tg_sources.len(), "fetching TG source history");
+                fetch_tg::fetch_tg_sources(client, pool, &tg_sources, covers_from, &cancel)
+                    .await
+                    .context("fetching TG sources")?;
+            }
+        }
     }
-
-    // Determine time window
-    let now = Utc::now();
-    let since_duration = since_override.map(|d| chrono::Duration::from_std(d).unwrap_or(chrono::Duration::days(7)));
-    let covers_from = if let Some(duration) = since_duration {
-        now - duration
-    } else if let Some(ref last_gen) = channel.last_generated {
-        *last_gen
-    } else {
-        now - chrono::Duration::days(7)
-    };
-
-    info!(
-        from = %covers_from.to_rfc3339(),
-        to = %now.to_rfc3339(),
-        "content time window"
-    );
 
     let items = store::get_items_in_window(pool, &source_ids, covers_from, now)
         .await
@@ -189,6 +208,15 @@ pub async fn run_generation(
     store::insert_generated_article(pool, &article)
         .await
         .context("storing generated article")?;
+
+    // Mark TG channels as read if configured (PRD §10.7)
+    if channel_config.mark_tg_read.unwrap_or(false) {
+        if let Some(client) = tg_client {
+            telegram::mark_channels_as_read(client, pool, &items).await;
+        } else {
+            warn!(channel = %channel.name, "mark_tg_read is enabled but no Telegram client available");
+        }
+    }
 
     // Update last_generated (skip for --since overrides)
     if since_override.is_none() {

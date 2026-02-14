@@ -7,6 +7,12 @@ use uuid::Uuid;
 use crate::config::Config;
 use crate::models::{ContentItem, GeneratedArticle, GeneratedArticleRow, OutputChannel, Source};
 
+/// All source columns in SELECT order (must match Source struct field order).
+const SOURCE_COLUMNS: &str = "id, source_type, name, enabled, url, poll_interval, max_items,
+    auth_type, auth_username, auth_password, auth_token, auth_header_name, auth_header_value,
+    last_fetched_at, last_etag, last_modified_header,
+    tg_id, tg_username, tg_folder_id, tg_folder_name, tg_exclude, description";
+
 /// Upsert a source by name — insert or update if it already exists.
 pub async fn upsert_source(pool: &SqlitePool, source: &crate::config::SourceConfig) -> Result<String> {
     let (auth_type, auth_username, auth_password, auth_token, auth_header_name, auth_header_value) =
@@ -24,6 +30,10 @@ pub async fn upsert_source(pool: &SqlitePool, source: &crate::config::SourceConf
         };
 
     let enabled = source.enabled.unwrap_or(true);
+    let tg_exclude = source
+        .exclude
+        .as_ref()
+        .map(|v| serde_json::to_string(v).unwrap_or_default());
 
     // Check if source exists by name
     let existing: Option<(String,)> = sqlx::query_as("SELECT id FROM sources WHERE name = ?")
@@ -36,6 +46,7 @@ pub async fn upsert_source(pool: &SqlitePool, source: &crate::config::SourceConf
         sqlx::query(
             "UPDATE sources SET source_type = ?, enabled = ?, url = ?, poll_interval = ?, max_items = ?,
              auth_type = ?, auth_username = ?, auth_password = ?, auth_token = ?, auth_header_name = ?, auth_header_value = ?,
+             tg_id = COALESCE(?, tg_id), tg_username = ?, tg_folder_name = ?, tg_exclude = ?, description = ?,
              updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
              WHERE id = ?",
         )
@@ -50,6 +61,11 @@ pub async fn upsert_source(pool: &SqlitePool, source: &crate::config::SourceConf
         .bind(&auth_token)
         .bind(&auth_header_name)
         .bind(&auth_header_value)
+        .bind(source.tg_id)
+        .bind(&source.tg_username)
+        .bind(&source.tg_folder_name)
+        .bind(&tg_exclude)
+        .bind(&source.description)
         .bind(&existing_id)
         .execute(pool)
         .await
@@ -61,8 +77,9 @@ pub async fn upsert_source(pool: &SqlitePool, source: &crate::config::SourceConf
         let id = Uuid::new_v4().to_string();
         sqlx::query(
             "INSERT INTO sources (id, source_type, name, enabled, url, poll_interval, max_items,
-             auth_type, auth_username, auth_password, auth_token, auth_header_name, auth_header_value)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             auth_type, auth_username, auth_password, auth_token, auth_header_name, auth_header_value,
+             tg_id, tg_username, tg_folder_name, tg_exclude, description)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&id)
         .bind(&source.source_type)
@@ -77,6 +94,11 @@ pub async fn upsert_source(pool: &SqlitePool, source: &crate::config::SourceConf
         .bind(&auth_token)
         .bind(&auth_header_name)
         .bind(&auth_header_value)
+        .bind(source.tg_id)
+        .bind(&source.tg_username)
+        .bind(&source.tg_folder_name)
+        .bind(&tg_exclude)
+        .bind(&source.description)
         .execute(pool)
         .await
         .context("inserting source")?;
@@ -165,7 +187,7 @@ pub async fn upsert_output_channel(
 /// Sync all sources and output channels from config to DB.
 /// Sources and channels not in config are deleted (cascading to content_items).
 pub async fn sync_config_to_db(pool: &SqlitePool, config: &Config) -> Result<()> {
-    // First, upsert all sources and build a name→id map
+    // First, upsert all sources and build a name->id map
     let mut source_name_to_id = std::collections::HashMap::new();
     for source in &config.source {
         let id = upsert_source(pool, source).await?;
@@ -254,12 +276,9 @@ pub async fn get_sources_by_ids(pool: &SqlitePool, ids: &[String]) -> Result<Vec
         return Ok(Vec::new());
     }
 
-    // Build a query with placeholders
     let placeholders: Vec<&str> = ids.iter().map(|_| "?").collect();
     let query = format!(
-        "SELECT id, source_type, name, enabled, url, poll_interval, max_items,
-         auth_type, auth_username, auth_password, auth_token, auth_header_name, auth_header_value, last_fetched_at, last_etag, last_modified_header
-         FROM sources WHERE id IN ({})",
+        "SELECT {SOURCE_COLUMNS} FROM sources WHERE id IN ({})",
         placeholders.join(", ")
     );
 
@@ -273,7 +292,7 @@ pub async fn get_sources_by_ids(pool: &SqlitePool, ids: &[String]) -> Result<Vec
     Ok(sources)
 }
 
-/// Upsert a content item (skip if same source_id + url exists).
+/// Upsert a content item (skip if same source_id + dedup_key exists).
 pub async fn upsert_content_item(pool: &SqlitePool, item: &ContentItem) -> Result<()> {
     sqlx::query(
         "INSERT INTO content_items (id, source_id, ingested_at, original_date, content_type, title, body, url, author, metadata, dedup_key)
@@ -401,20 +420,6 @@ pub async fn set_setting(pool: &SqlitePool, key: &str, value: &str) -> Result<()
     Ok(())
 }
 
-/// Get a source by name.
-pub async fn get_source_by_name(pool: &SqlitePool, name: &str) -> Result<Option<Source>> {
-    let source = sqlx::query_as::<_, Source>(
-        "SELECT id, source_type, name, enabled, url, poll_interval, max_items,
-         auth_type, auth_username, auth_password, auth_token, auth_header_name, auth_header_value, last_fetched_at, last_etag, last_modified_header
-         FROM sources WHERE name = ?",
-    )
-    .bind(name)
-    .fetch_optional(pool)
-    .await
-    .context("querying source by name")?;
-    Ok(source)
-}
-
 /// Update fetch state on a source: last_fetched_at, ETag, and Last-Modified.
 pub async fn update_source_fetch_state(
     pool: &SqlitePool,
@@ -476,13 +481,109 @@ pub async fn get_all_enabled_channels(pool: &SqlitePool) -> Result<Vec<OutputCha
 
 /// Get all enabled sources.
 pub async fn get_all_enabled_sources(pool: &SqlitePool) -> Result<Vec<Source>> {
-    let sources = sqlx::query_as::<_, Source>(
-        "SELECT id, source_type, name, enabled, url, poll_interval, max_items,
-         auth_type, auth_username, auth_password, auth_token, auth_header_name, auth_header_value, last_fetched_at, last_etag, last_modified_header
-         FROM sources WHERE enabled = 1",
+    let query = format!("SELECT {SOURCE_COLUMNS} FROM sources WHERE enabled = 1");
+    let sources = sqlx::query_as::<_, Source>(&query)
+        .fetch_all(pool)
+        .await
+        .context("querying enabled sources")?;
+    Ok(sources)
+}
+
+// ── Telegram-specific queries ──────────────────────────────────────────
+
+/// Get enabled sources where type starts with "telegram_".
+pub async fn get_tg_sources(pool: &SqlitePool) -> Result<Vec<Source>> {
+    let query = format!("SELECT {SOURCE_COLUMNS} FROM sources WHERE enabled = 1 AND source_type LIKE 'telegram_%'");
+    let sources = sqlx::query_as::<_, Source>(&query)
+        .fetch_all(pool)
+        .await
+        .context("querying TG sources")?;
+    Ok(sources)
+}
+
+/// Store resolved numeric tg_id for a source.
+pub async fn update_source_tg_id(pool: &SqlitePool, source_id: &str, tg_id: i64) -> Result<()> {
+    sqlx::query("UPDATE sources SET tg_id = ? WHERE id = ?")
+        .bind(tg_id)
+        .bind(source_id)
+        .execute(pool)
+        .await
+        .context("updating source tg_id")?;
+    Ok(())
+}
+
+/// Store resolved folder ID for a folder source.
+pub async fn update_source_tg_folder_id(pool: &SqlitePool, source_id: &str, folder_id: i32) -> Result<()> {
+    sqlx::query("UPDATE sources SET tg_folder_id = ? WHERE id = ?")
+        .bind(folder_id)
+        .bind(source_id)
+        .execute(pool)
+        .await
+        .context("updating source tg_folder_id")?;
+    Ok(())
+}
+
+/// Upsert a channel belonging to a folder source.
+pub async fn upsert_folder_channel(
+    pool: &SqlitePool,
+    folder_source_id: &str,
+    channel_tg_id: i64,
+    name: Option<&str>,
+    username: Option<&str>,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO tg_folder_channels (folder_source_id, channel_tg_id, channel_name, channel_username)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(folder_source_id, channel_tg_id) DO UPDATE SET
+           channel_name = excluded.channel_name,
+           channel_username = excluded.channel_username",
+    )
+    .bind(folder_source_id)
+    .bind(channel_tg_id)
+    .bind(name)
+    .bind(username)
+    .execute(pool)
+    .await
+    .context("upserting folder channel")?;
+    Ok(())
+}
+
+/// Delete all channels for a folder source (used before re-sync).
+pub async fn delete_folder_channels(pool: &SqlitePool, folder_source_id: &str) -> Result<()> {
+    sqlx::query("DELETE FROM tg_folder_channels WHERE folder_source_id = ?")
+        .bind(folder_source_id)
+        .execute(pool)
+        .await
+        .context("deleting folder channels")?;
+    Ok(())
+}
+
+/// Get channels belonging to a folder source with their info.
+/// Returns (channel_tg_id, channel_name, channel_username) for enabled channels.
+pub async fn get_folder_channels_with_info(
+    pool: &SqlitePool,
+    folder_source_id: &str,
+) -> Result<Vec<(i64, Option<String>, Option<String>)>> {
+    let rows: Vec<(i64, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT channel_tg_id, channel_name, channel_username FROM tg_folder_channels WHERE folder_source_id = ? AND enabled = 1",
+    )
+    .bind(folder_source_id)
+    .fetch_all(pool)
+    .await
+    .context("querying folder channels with info")?;
+    Ok(rows)
+}
+
+/// Get all folder channel entries: (source_id, channel_tg_id) for building the subscription map.
+pub async fn get_all_folder_channel_ids(pool: &SqlitePool) -> Result<Vec<(String, i64)>> {
+    let rows: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT fc.folder_source_id, fc.channel_tg_id
+         FROM tg_folder_channels fc
+         JOIN sources s ON s.id = fc.folder_source_id
+         WHERE fc.enabled = 1 AND s.enabled = 1",
     )
     .fetch_all(pool)
     .await
-    .context("querying enabled sources")?;
-    Ok(sources)
+    .context("querying all folder channel IDs")?;
+    Ok(rows)
 }

@@ -74,3 +74,17 @@ rand = "0.9"
 
 # Temp directories
 tempfile = "3"
+
+# Secure password input (no terminal echo)
+rpassword = "5"
+
+# Futures (needed for BoxFuture in grammers Session trait impl)
+futures-core = "0.3"
+
+# Telegram MTProto client (grammers ecosystem)
+# Using git from Codeberg (canonical repo) — crates.io releases are infrequent
+# and inter-crate version compatibility matters. All three from the same repo.
+grammers-client = { git = "https://codeberg.org/Lonami/grammers", features = ["markdown", "html"] }
+grammers-mtsender = { git = "https://codeberg.org/Lonami/grammers" }
+grammers-session = { git = "https://codeberg.org/Lonami/grammers", default-features = false }
+grammers-tl-types = { git = "https://codeberg.org/Lonami/grammers" }

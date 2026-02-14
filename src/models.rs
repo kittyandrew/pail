@@ -19,6 +19,13 @@ pub struct Source {
     pub last_fetched_at: Option<DateTime<Utc>>,
     pub last_etag: Option<String>,
     pub last_modified_header: Option<String>,
+    // Telegram-specific fields
+    pub tg_id: Option<i64>,
+    pub tg_username: Option<String>,
+    pub tg_folder_id: Option<i32>,
+    pub tg_folder_name: Option<String>,
+    pub tg_exclude: Option<String>, // JSON array
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, FromRow)]

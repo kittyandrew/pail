@@ -169,6 +169,7 @@ pub async fn scheduler_loop(
     pool: SqlitePool,
     config: Arc<Config>,
     semaphore: Arc<Semaphore>,
+    tg_client: Option<grammers_client::Client>,
     cancel: CancellationToken,
 ) {
     info!("scheduler started");
@@ -238,6 +239,7 @@ pub async fn scheduler_loop(
             let pool = pool.clone();
             let config = config.clone();
             let semaphore = semaphore.clone();
+            let tg_client = tg_client.clone();
             let cancel = cancel.clone();
             let in_flight = in_flight.clone();
 
@@ -260,7 +262,9 @@ pub async fn scheduler_loop(
 
                 info!(channel = %channel_config.name, "scheduled generation starting");
 
-                match pipeline::run_generation(&pool, &config, &channel_config, None, false, cancel).await {
+                match pipeline::run_generation(&pool, &config, &channel_config, None, false, tg_client.as_ref(), cancel)
+                    .await
+                {
                     Ok(Some(r)) => {
                         info!(channel = %channel_config.name, title = %r.article.title, "scheduled generation complete");
                     }

@@ -54,13 +54,186 @@ version = 1
 # Additional CLI flags passed to `opencode run` (e.g., ["--format", "json"])
 # extra_args = []
 
+# System prompt template for digest generation. The {editorial_directive} placeholder
+# is replaced with each output channel's prompt field at render time.
+# This is the full prompt sent to the AI — edit it to change generation behavior.
+system_prompt = """
+You are pail's digest generator. Your job is to read collected content from
+multiple sources and write a single, high-quality digest article.
+
+## Editorial Directive
+{editorial_directive}
+
+## Workspace
+All input data is in the current directory:
+- `manifest.json` — generation metadata (channel config, time window, source list)
+- `sources/` — one markdown file per source (`<slug>.md`), each with a YAML frontmatter
+  header (name, type, item_count, description) followed by content items separated by `---`
+- `output.md` — write the final article HERE
+
+## Instructions
+1. Follow the editorial directive above closely — it defines the user's preferences.
+2. Read `manifest.json` for the time window, source list, and channel metadata.
+3. Read each source's content files in `sources/`.
+4. Handle each source type according to the rules below (§ RSS Sources, § Telegram Sources).
+5. For large inputs, consider summarizing per-source first, then synthesizing.
+6. Write the final article to `output.md`.
+7. Re-read your output and iterate if the quality is insufficient.
+
+## Condensation and Fidelity
+As source volume grows, you will need to condense more aggressively. This is expected —
+a digest covering 200 articles cannot give each one a full paragraph. However:
+- **Preserve the author's intent.** Condensation must retain the core argument, key evidence,
+  and nuance of each piece. If an article's point is subtle or counterintuitive, make sure
+  that subtlety survives the summary. Do not flatten complex arguments into generic platitudes.
+- **Stay specific.** A condensed section should still contain concrete details: names, numbers,
+  mechanisms, conclusions. "Researchers found interesting results" is useless. "MIT researchers
+  showed 40% latency reduction using speculative decoding on Llama 3" is a digest.
+- **Do not mislead by omission.** If condensing forces you to drop important caveats or
+  counter-arguments, either keep them or skip the article entirely rather than presenting
+  a misleading one-sided summary.
+- **Scale gracefully.** With few articles, write thorough sections. With many, write tighter
+  summaries but never sacrifice clarity for brevity. The reader should understand *why*
+  something matters, not just *that* it happened.
+
+## RSS Sources
+- Source content files contain RSS summaries or excerpts, not the full text.
+- **IMPORTANT: Fetch full articles.** For every item that has a **Link** URL,
+  you MUST fetch the full article from that URL before writing about it. Do not write
+  about an article based only on a title or summary — get the real content first.
+  Skip items where the full content cannot be retrieved.
+
+## Telegram Sources
+- Source content files contain the full message text as collected from the live event stream.
+  No additional fetching is needed — the content is already complete.
+- Each message includes a **Message ID** (e.g., `#1234`). Replies include a **Reply to** field
+  referencing the parent message ID (e.g., `**Reply to:** #1230`). Use these to reconstruct
+  conversation threads — group related messages and replies together in the digest.
+- **Forwarded messages** are clearly labeled to prevent misattribution:
+  - **Forwarded by:** shows who shared/forwarded the message into the chat (NOT the original author)
+  - **Original source:** shows where the content originally came from (channel name or ID)
+  - **Original author:** if available, shows the author within the original channel
+  - Always attribute forwarded content to the **original source**, not to the person who forwarded it.
+    The forwarder is just sharing someone else's content.
+- Media messages include a **Media** field indicating the type (photo, document, sticker, etc.).
+  Binary content is not included — describe media based on captions and context. Media-only
+  messages (no caption) are shown as `[photo — no caption, see link]`.
+- Link formats differ by chat type:
+  - Public channels/groups (has @username): `https://t.me/<username>/<message_id>`
+  - Private channels/groups (no username): `https://t.me/c/<numeric_id>/<message_id>`
+  - Forum topics: `https://t.me/<username_or_c/id>/<topic_id>/<message_id>`
+- **Attribution:** Always identify who expressed a specific idea, argument, or shared content
+  by their username or display name. This is essential context — the reader needs to know who
+  said what. Format names in italics (e.g., `*Username*`) so they stand out visually. Attribute
+  each distinct viewpoint to its author, inline where the statement appears — do not summarize
+  a discussion without naming who said what.
+
+## Output Format
+Write `output.md` with YAML frontmatter followed by the article body:
+
+    ---
+    title: "Your Article Title"
+    topics:
+      - "Topic 1"
+      - "Topic 2"
+    ---
+
+    # Your Article Title
+    ...article body...
+
+## Article Body Format
+- Start with a `# Title` matching the frontmatter title
+- Use `## Sections` to organize by topic, not by source
+- Synthesize related ideas across posts, find connections
+- Use inline links `[text](url)` to reference original articles/messages
+- Link to original articles. Skip anything that's just a short announcement with no substance
+- End with a `## Sources` section listing all referenced sources
+- **Never silently ignore articles.** If you skip an article for any reason (too short,
+  off-topic, couldn't fetch content, etc.), list it in a final `## Skipped` section.
+  Every skipped item MUST be a markdown bullet with the article link and a one-line reason.
+  No sub-headings, no grouping, no vague summaries like "multiple articles about X" —
+  list each article individually: `- [Title](url) — reason`
+
+## Editor's Notes
+There are two types of editor's notes. Use both where appropriate.
+
+**Tone and Framework:** Editor's notes are written in a distinctly different voice from
+the main digest. The main body reports and synthesizes — editor's notes *assess*. Adopt
+a rationalist epistemological framework: verified evidence and trusted primary sources
+always take priority over pure reasoning. However, when no external source is available
+or the point does not require one, clear logical reasoning from established premises is
+the next best tool — and is far better than leaving a dubious claim unchallenged. State
+your epistemic basis explicitly: "data from X shows..." vs "reasoning from Y, we would
+expect..." so the reader can calibrate trust accordingly.
+
+1. **Fact-checking blockquotes:** If a post makes bold or original claims, add
+   `> **Editor's Note:**` blockquotes with your assessment. Be firm and fair.
+   Consider fact-checking a key part of your job, not just parroting articles.
+   When evidence exists, cite it — link to the study, the dataset, the counter-argument.
+   When it does not, reason clearly from what is known and flag the uncertainty.
+   If the claim is plausible but unverified, say so and explain what evidence
+   would confirm or refute it.
+
+2. **Inline annotations:** If a post contains specialized language, commonly confused
+   or unusual terms, add an inline editor's note explaining what it actually means.
+   You may also add verified, valid additional references as markdown hyperlinks.
+
+   Examples of where inline notes are useful:
+   - "Meanwhile, OpenAI hired Dylan Scandinaro (formerly X at Y) as Head of
+     Preparedness (OpenAI's team responsible for evaluating catastrophic risks), ..."
+   - "... documents obtained in cooperation with [Dallas](https://dallas-park.com/),
+     a Ukrainian analytical company specializing in leaked Russian documents, ..."
+   - "... systems like the [Koalitsiya](https://en.wikipedia.org/wiki/2S35_Koalitsiya-SV)
+     and [Msta](https://en.wikipedia.org/wiki/2S19_Msta) self-propelled howitzers, ..."
+
+## References and Citations
+- Preserve references to external data, studies, papers, and other sources from the
+  original articles as much as possible. If the original text cites something, keep
+  that citation in the digest with a working link
+- If an article lists references separately (e.g., at the end, in footnotes, or in a
+  bibliography), incorporate them inline into the text as markdown hyperlinks rather
+  than leaving them as a separate list
+- When an article mentions a specific claim with a source, link directly to that source,
+  not just to the article making the claim
+
+## Link Verification — CRITICAL
+**NEVER include a URL you have not verified.** Every hyperlink in the article — whether
+in the main body, editor's notes, or inline annotations — must be either:
+1. A URL that appeared in the source content files (already verified by pail), OR
+2. A URL you have fetched yourself during this session and confirmed returns real content
+
+If you want to reference something in an editor's note (a study, a dataset, a counter-argument),
+you MUST fetch the URL first to confirm it exists and says what you claim it says. If you cannot
+find a working URL, either omit the reference or state the claim without a link and note that
+you could not locate a primary source. A fabricated link is worse than no link — it destroys
+reader trust in the entire digest.
+
+## Writing Style
+- Write like a Reuters correspondent. Avoid typical AI-smell like em-dash saturation
+- Do not address the reader directly. The editor does not know the reader's country,
+  so specify what and who you are talking about, but do not overexplain
+- Tone should reflect confidence in factuality. Do not prefer political leaning
+  over facts and evidence
+- Highlight what is genuinely new or significant
+- Be honest about uncertainty — if something seems unverified, say so
+- Respect the editorial directive's stated interests and ignore topics it asks to skip
+"""
+
+
+[telegram]
+# Global toggle for Telegram integration
+enabled = false
+# API credentials from my.telegram.org (required if any TG sources are configured)
+# api_id = 12345
+# api_hash = "abc123"
+
 
 # ┌─────────────────────────────────────────────────────────────────────┐
 # │ Sources                                                             │
 # │                                                                     │
 # │ Each [[source]] defines an input feed to monitor.                   │
-# │ Supported types: "rss" (Phase 1), "telegram_channel",              │
-# │ "telegram_group", "telegram_folder" (planned Phase 2).             │
+# │ Supported types: "rss", "telegram_channel",                        │
+# │ "telegram_group", "telegram_folder".                               │
 # └─────────────────────────────────────────────────────────────────────┘
 
 [[source]]
@@ -73,6 +246,8 @@ url = "https://hnrss.org/frontpage"
 # max_items = 200
 # Set to false to temporarily disable this source without removing it
 # enabled = true
+# Human-readable description of the source (shown to the AI in the workspace)
+# description = "Tech news aggregator — community-voted links and discussions"
 
 [[source]]
 name = "Lobsters"
@@ -109,6 +284,28 @@ url = "https://lobste.rs/rss"
 # header_value = "my-api-key"
 
 
+# Example: Telegram channel source (requires [telegram].enabled = true)
+# [[source]]
+# name = "Tech Ukraine"
+# type = "telegram_channel"
+# tg_username = "tech_ukraine"
+# description = "Ukrainian tech industry news channel, posts in Ukrainian"
+
+# Example: Telegram group source
+# [[source]]
+# name = "Rust Community"
+# type = "telegram_group"
+# tg_username = "rustlang_community"
+# description = "Rust programming language community chat"
+
+# Example: Telegram folder source (monitors all channels in a Telegram folder)
+# [[source]]
+# name = "News Folder"
+# type = "telegram_folder"
+# tg_folder_name = "News"
+# exclude = ["@some_noisy_channel"]
+
+
 # ┌─────────────────────────────────────────────────────────────────────┐
 # │ Output Channels                                                     │
 # │                                                                     │
@@ -138,6 +335,9 @@ schedule = "at:08:00"
 # language = "en"
 # Set to false to temporarily disable this channel without removing it
 # enabled = true
+# After digest generation, mark Telegram channels/groups as read (default: off).
+# Only affects Telegram sources in this channel. The ONLY write operation pail performs on TG.
+# mark_tg_read = false
 # Source names (must match [[source]] name values exactly)
 sources = ["Hacker News", "Lobsters"]
 # Editorial directive — controls what the AI writes about and how.
@@ -149,3 +349,44 @@ Skip: startup funding, crypto prices, social media drama.
 Add Editor's Notes for any claims that seem dubious.
 Write in English.
 """
+
+
+# ┌─────────────────────────────────────────────────────────────────────┐
+# │ Example: Telegram group → digest (step by step)                     │
+# │                                                                     │
+# │ 1. Enable [telegram] above and set api_id / api_hash               │
+# │ 2. Run `pail tg login` to authenticate your Telegram account       │
+# │ 3. Uncomment the [[source]] and [[output_channel]] below           │
+# │ 4. Set the tg_id to your group's numeric ID (see below)            │
+# │ 5. Run: pail generate my-group --since 1d --output ./digest.md     │
+# │                                                                     │
+# │ Finding tg_id for a PRIVATE group (no @username):                   │
+# │   - Telegram Web: open the group, the URL is                        │
+# │     web.telegram.org/a/#-XXXXXXXXXX — the number after # is the ID │
+# │     (drop the leading dash, e.g. -1001234567890 → 1234567890)      │
+# │   - Telegram Desktop: right-click the group in chat list →          │
+# │     "Copy chat link" gives a t.me/c/XXXXXXXXXX/1 link —            │
+# │     the number after /c/ is the numeric ID                          │
+# │                                                                     │
+# │ For PUBLIC groups (has @username), use tg_username instead:          │
+# │   tg_username = "group_username"                                    │
+# └─────────────────────────────────────────────────────────────────────┘
+
+# [[source]]
+# name = "My Private Group"
+# type = "telegram_group"
+# tg_id = 1234567890              # numeric ID (see instructions above)
+# description = "Private friend group, discusses tech and local news"
+
+# [[output_channel]]
+# name = "Group Digest"
+# slug = "my-group"
+# schedule = "at:20:00"
+# sources = ["My Private Group"]
+# mark_tg_read = true
+# prompt = """
+# Summarize the key discussions from this group chat.
+# Group related messages and reply chains into topics.
+# Translate non-English content to English.
+# Link to key messages using the t.me URLs.
+# """
