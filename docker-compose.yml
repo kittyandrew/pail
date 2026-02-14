@@ -1,7 +1,11 @@
 # Build the image first: nix build .#docker && docker load < result
+version: "3"
 services:
   pail:
+    container_name: pail
     image: pail:0.1.0
+    restart: always
+    # Expose port for direct access (remove if using a reverse proxy on the same Docker network)
     ports:
       - "8080:8080"
     volumes:
@@ -13,3 +17,10 @@ services:
     # environment:
     #   - OPENAI_API_KEY=${OPENAI_API_KEY}
     #   - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+
+# Uncomment to join an external Docker network (e.g., for a Caddy reverse proxy).
+# With this, remove the `ports` section above — Caddy connects via the network name.
+# networks:
+#   default:
+#     name: caddynet
+#     external: true

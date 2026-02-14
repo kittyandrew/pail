@@ -126,17 +126,25 @@ Alternatively, pass API keys as environment variables (see `docker-compose.yml`)
 
 ## Reverse Proxy
 
-pail's built-in HTTP server is designed to sit behind a reverse proxy. Set `listen = "127.0.0.1:8080"` in your config so pail only accepts local connections, and let the proxy handle TLS.
+pail's built-in HTTP server is designed to sit behind a reverse proxy. [Caddy](https://caddyserver.com/) is recommended — automatic HTTPS with zero config.
 
-[Caddy](https://caddyserver.com/) is recommended — automatic HTTPS with zero config:
+**Docker network (recommended):** Uncomment the `networks` section in `docker-compose.yml` to join an external `caddynet` network, and remove the `ports` block — Caddy connects to `pail:8080` via the Docker network:
 
 ```caddyfile
-pail.kittyandrew.dev {
+pail.example.com {
+	reverse_proxy pail:8080
+}
+```
+
+**Host-level proxy:** If Caddy runs outside Docker, keep the `ports` section and set `listen = "127.0.0.1:8080"` in your config:
+
+```caddyfile
+pail.example.com {
 	reverse_proxy localhost:8080
 }
 ```
 
-Feed readers can then subscribe to `https://pail.kittyandrew.dev/feed/default/<slug>.atom?token=<token>`.
+Feed readers can then subscribe to `https://pail.example.com/feed/default/<slug>.atom?token=<token>`.
 
 ## Schedule Formats
 
