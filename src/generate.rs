@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use gray_matter::Matter;
 use gray_matter::engine::YAML;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use tokio::io::AsyncReadExt;
@@ -101,6 +101,10 @@ pub async fn generate_article(
         .map_err(GenerationError::Workspace)?;
 
     if output_content.trim().is_empty() {
+        error!(
+            generation_log = %generation_log,
+            "output.md is empty — opencode log above may indicate the cause"
+        );
         return Err(GenerationError::OutputParse("output.md is empty".to_string()).into());
     }
 

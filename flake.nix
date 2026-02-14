@@ -50,11 +50,12 @@
           name = "image-root";
           paths = [pail opencodePkg pkgs.cacert];
         };
-        # Scratch image has no base filesystem — create /tmp for generation workspaces
-        extraCommands = "mkdir -p tmp";
+        # Scratch image has no base filesystem — create dirs for workspaces and home
+        extraCommands = "mkdir -p tmp root";
         config = {
           Entrypoint = ["${pail}/bin/pail" "--config" "/etc/pail/config.toml"];
           Env = [
+            "HOME=/root"
             "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
           ];
           ExposedPorts = {"8080/tcp" = {};};
