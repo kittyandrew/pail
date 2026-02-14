@@ -50,6 +50,8 @@
           name = "image-root";
           paths = [pail opencodePkg pkgs.cacert];
         };
+        # Scratch image has no base filesystem — create /tmp for generation workspaces
+        extraCommands = "mkdir -p tmp";
         config = {
           Entrypoint = ["${pail}/bin/pail" "--config" "/etc/pail/config.toml"];
           Env = [
