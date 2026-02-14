@@ -51,7 +51,7 @@
           paths = [pail opencodePkg pkgs.cacert];
         };
         config = {
-          Cmd = ["${pail}/bin/pail" "--config" "/etc/pail/config.toml"];
+          Entrypoint = ["${pail}/bin/pail" "--config" "/etc/pail/config.toml"];
           Env = [
             "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
           ];

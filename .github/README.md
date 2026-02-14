@@ -113,7 +113,7 @@ cp config.example.toml config.toml
 # In config.toml, change: data_dir = "/var/lib/pail"
 
 # Authenticate opencode (one-time, interactive)
-docker compose run --rm -it pail opencode auth login
+docker compose run --rm -it --entrypoint opencode pail auth login
 
 # Authenticate Telegram (one-time, if using TG sources)
 docker compose run --rm -it pail tg login
