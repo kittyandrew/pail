@@ -53,7 +53,9 @@ fn default_timezone() -> String {
     "UTC".to_string()
 }
 fn default_log_level() -> String {
-    "info".to_string()
+    // Suppress grammers MTProto internals (gap recovery, salt rotation, connection events)
+    // which log at INFO but are only useful for debugging protocol issues.
+    "info,grammers_session=warn,grammers_mtsender=warn,grammers_mtproto=warn".to_string()
 }
 fn default_max_concurrent() -> u32 {
     1

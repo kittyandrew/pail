@@ -16,8 +16,11 @@ version = 1
 # IANA timezone for schedule evaluation (e.g., "UTC", "America/New_York", "Europe/Berlin")
 # timezone = "UTC"
 
-# Log level: "trace", "debug", "info", "warn", "error"
-# log_level = "info"
+# Log level. Supports simple levels ("info") or per-crate directives
+# using tracing's EnvFilter syntax ("info,grammers_session=warn").
+# The RUST_LOG env var overrides this if set.
+# Default suppresses noisy grammers MTProto internals:
+# log_level = "info,grammers_session=warn,grammers_mtsender=warn,grammers_mtproto=warn"
 
 # Maximum number of digest generations that can run simultaneously
 # max_concurrent_generations = 1
