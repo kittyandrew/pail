@@ -1,6 +1,6 @@
 # pail — Personal AI Lurker
 
-A self-hosted service that monitors RSS feeds (and eventually Telegram channels), generates AI digest articles via [opencode](https://opencode.ai), and publishes them as Atom feeds.
+A self-hosted service that monitors RSS feeds and Telegram channels/groups/folders, generates AI digest articles via [opencode](https://opencode.ai), and publishes them as Atom feeds.
 
 ## Quick Start
 
@@ -8,6 +8,7 @@ A self-hosted service that monitors RSS feeds (and eventually Telegram channels)
 
 - [Nix](https://nixos.org/download/) with flakes enabled
 - An LLM provider API key (or use the free `opencode/big-pickle` model)
+- For Telegram sources: API credentials from [my.telegram.org](https://my.telegram.org)
 
 ### Development
 
@@ -17,7 +18,10 @@ cargo build          # build
 cargo clippy         # lint
 cargo test           # test
 cargo fmt --check    # format check
+alejandra -c .       # Nix format check
 ```
+
+CI runs these checks automatically on push to `main` and on PRs (see `.github/workflows/ci.yml`).
 
 ### Configuration
 
@@ -28,11 +32,26 @@ cp config.example.toml config.toml
 ```
 
 Key sections:
-- `[[source]]` — define RSS feeds to monitor
+- `[[source]]` — define RSS feeds and Telegram channels/groups/folders to monitor
 - `[[output_channel]]` — define digest channels with schedule, prompt, and source list
-- `[opencode]` — LLM model and binary path
+- `[opencode]` — LLM model, binary path, and system prompt template
+- `[telegram]` — API credentials and global toggle for Telegram integration
 
 See `config.example.toml` for all options with comments.
+
+### Telegram Setup
+
+To use Telegram sources, enable `[telegram]` in your config with `api_id` and `api_hash` from [my.telegram.org](https://my.telegram.org), then authenticate:
+
+```bash
+# Interactive login (phone number, verification code, optional 2FA)
+pail tg login
+
+# Verify session
+pail tg status
+```
+
+The session is stored in the database and persists across restarts.
 
 ### CLI Usage
 
@@ -40,7 +59,7 @@ See `config.example.toml` for all options with comments.
 # Validate config
 pail validate
 
-# Generate a digest (one-shot, fetches RSS + invokes opencode)
+# Generate a digest (one-shot, fetches RSS + TG history, invokes opencode)
 pail generate tech-digest --output ./digest.md
 
 # Re-generate with a custom time window (useful for prompt iteration)
@@ -49,7 +68,7 @@ pail generate tech-digest --since 7d --output ./digest.md
 
 ### Daemon Mode
 
-Run without a subcommand to start the daemon (scheduler + RSS poller + Atom feed server):
+Run without a subcommand to start the daemon:
 
 ```bash
 pail --config config.toml
@@ -57,6 +76,7 @@ pail --config config.toml
 
 The daemon:
 - Polls RSS feeds at configured intervals
+- Listens for live Telegram messages from subscribed channels/groups
 - Generates digests on schedule (e.g., `at:08:00,20:00`)
 - Serves Atom feeds at `http://localhost:8080/feed/default/<slug>.atom`
 
@@ -94,6 +114,9 @@ cp config.example.toml config.toml
 
 # Authenticate opencode (one-time, interactive)
 docker-compose run --rm -it pail opencode auth login
+
+# Authenticate Telegram (one-time, if using TG sources)
+docker-compose run --rm -it pail tg login
 
 # Start the service
 docker-compose up -d
