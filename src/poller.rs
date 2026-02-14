@@ -11,7 +11,7 @@ const MIN_POLL_INTERVAL_SECS: i64 = 300; // 5 minutes
 /// RSS polling loop. Wakes every 60 seconds and fetches due sources.
 pub async fn polling_loop(pool: SqlitePool, cancel: CancellationToken) {
     info!("RSS poller started");
-    // Short initial delay to let everything else initialize
+    // Short initial delay before first poll cycle
     tokio::select! {
         _ = cancel.cancelled() => return,
         _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {}

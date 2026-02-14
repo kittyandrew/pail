@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
@@ -138,12 +138,10 @@ impl Schedule {
     }
 
     /// Check if a generation is due.
-    pub fn is_due(&self, tz: Tz, last_generated: Option<DateTime<Utc>>, now: DateTime<Utc>) -> bool {
-        // New channel (never generated) — immediately due (PRD §9.2: 7-day default lookback)
-        let after = match last_generated {
-            Some(t) => t,
-            None => return true,
-        };
+    ///
+    /// `after` is the reference time to compute the next tick from (typically `last_generated`).
+    /// Returns true if the next scheduled tick after `after` is at or before `now`.
+    pub fn is_due(&self, tz: Tz, after: DateTime<Utc>, now: DateTime<Utc>) -> bool {
         match self.next_tick(tz, after) {
             Some(next) => next <= now,
             None => false,
@@ -176,6 +174,13 @@ pub async fn scheduler_loop(
 
     // Track which channels have in-flight generations to prevent double-firing
     let in_flight: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+
+    // Track when we first saw channels that have never generated.
+    // For new channels (last_generated = NULL), we wait for their next scheduled tick
+    // instead of firing immediately. The first-seen time serves as the reference for
+    // computing the next tick. On daemon restart this resets, which is correct —
+    // missed ticks are always skipped (PRD §9.2).
+    let mut first_seen: HashMap<String, DateTime<Utc>> = HashMap::new();
 
     loop {
         tokio::select! {
@@ -219,7 +224,15 @@ pub async fn scheduler_loop(
                 }
             };
 
-            if !schedule.is_due(tz, channel.last_generated, now) {
+            // For channels that have never generated, use the time we first saw them
+            // as the reference point. They wait for their next scheduled tick rather than
+            // firing immediately. The pipeline still uses the 7-day lookback for content
+            // collection when last_generated is NULL.
+            let after = channel
+                .last_generated
+                .unwrap_or_else(|| *first_seen.entry(channel.id.clone()).or_insert(now));
+
+            if !schedule.is_due(tz, after, now) {
                 continue;
             }
 
