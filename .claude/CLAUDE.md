@@ -15,6 +15,8 @@ The complete PRD lives in the kittyos repo (not this repo):
 
 ## CI / Linting
 
+All checks run in GitHub Actions CI (`.github/workflows/ci.yml`) on push to `main` and on PRs. Run locally via `nix develop`:
+
 ```bash
 # Format Nix files
 alejandra -c .
