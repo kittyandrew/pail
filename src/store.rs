@@ -479,6 +479,20 @@ pub async fn get_all_enabled_channels(pool: &SqlitePool) -> Result<Vec<OutputCha
     Ok(channels)
 }
 
+/// Get a single generated article by its UUID.
+pub async fn get_article_by_id(pool: &SqlitePool, article_id: &str) -> Result<Option<GeneratedArticleRow>> {
+    let article = sqlx::query_as::<_, GeneratedArticleRow>(
+        "SELECT id, output_channel_id, generated_at, covers_from, covers_to,
+         title, topics, body_html, body_markdown, content_item_ids, generation_log, model_used, token_count
+         FROM generated_articles WHERE id = ?",
+    )
+    .bind(article_id)
+    .fetch_optional(pool)
+    .await
+    .context("querying article by ID")?;
+    Ok(article)
+}
+
 /// Get all enabled sources.
 pub async fn get_all_enabled_sources(pool: &SqlitePool) -> Result<Vec<Source>> {
     let query = format!("SELECT {SOURCE_COLUMNS} FROM sources WHERE enabled = 1");

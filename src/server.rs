@@ -1,7 +1,7 @@
 use axum::Router;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
-use axum::response::{IntoResponse, Response};
+use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use sqlx::SqlitePool;
 use subtle::ConstantTimeEq;
@@ -18,6 +18,7 @@ pub struct AppState {
 pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/feed/{*path}", get(feed_handler))
+        .route("/article/{id}", get(article_handler))
         .with_state(state)
 }
 
@@ -74,7 +75,8 @@ async fn feed_handler(
     };
 
     // Build Atom feed
-    let feed = build_atom_feed(&channel, &articles);
+    let base_url = derive_base_url(&headers);
+    let feed = build_atom_feed(&channel, &articles, &base_url);
 
     let xml = feed.to_string();
 
@@ -119,11 +121,78 @@ fn constant_time_eq(a: &str, b: &str) -> bool {
     a.as_bytes().ct_eq(b.as_bytes()).into()
 }
 
+/// Derive the base URL from request headers (works behind reverse proxies).
+fn derive_base_url(headers: &HeaderMap) -> String {
+    let scheme = headers
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("http");
+    let host = headers
+        .get(header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("localhost");
+    format!("{scheme}://{host}")
+}
+
+/// Escape HTML special characters for safe embedding in HTML attributes/content.
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+async fn article_handler(State(state): State<AppState>, Path(id): Path<String>) -> Response {
+    // Validate UUID format
+    if uuid::Uuid::parse_str(&id).is_err() {
+        return (StatusCode::BAD_REQUEST, "Invalid article ID").into_response();
+    }
+
+    let article = match store::get_article_by_id(&state.pool, &id).await {
+        Ok(Some(a)) => a,
+        Ok(None) => return (StatusCode::NOT_FOUND, "Article not found").into_response(),
+        Err(e) => {
+            warn!(error = %e, "failed to look up article");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response();
+        }
+    };
+
+    let title = html_escape(&article.title);
+    let date = article.generated_at.format("%Y-%m-%d %H:%M UTC");
+
+    let html = format!(
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title}</title>
+<style>
+body {{ max-width: 48rem; margin: 2rem auto; padding: 0 1rem; font-family: system-ui, sans-serif; line-height: 1.6; color: #222; }}
+h1 {{ margin-bottom: 0.25rem; }}
+.date {{ color: #666; margin-bottom: 2rem; }}
+a {{ color: #0366d6; }}
+blockquote {{ border-left: 3px solid #ddd; margin-left: 0; padding-left: 1rem; color: #555; }}
+</style>
+</head>
+<body>
+<h1>{title}</h1>
+<p class="date">{date}</p>
+{body}
+</body>
+</html>"#,
+        body = article.body_html,
+    );
+
+    Html(html).into_response()
+}
+
 fn build_atom_feed(
     channel: &crate::models::OutputChannel,
     articles: &[crate::models::GeneratedArticleRow],
+    base_url: &str,
 ) -> atom_syndication::Feed {
-    use atom_syndication::{Category, Content, Entry, Feed, Person, Text};
+    use atom_syndication::{Category, Content, Entry, Feed, Link, Person, Text};
     use chrono::FixedOffset;
 
     let to_fixed = |dt: &chrono::DateTime<chrono::Utc>| -> chrono::DateTime<FixedOffset> {
@@ -161,6 +230,13 @@ fn build_atom_feed(
                 ..Default::default()
             };
 
+            let entry_link = Link {
+                href: format!("{base_url}/article/{}", article.id),
+                rel: "alternate".to_string(),
+                mime_type: Some("text/html".to_string()),
+                ..Default::default()
+            };
+
             Entry {
                 id: format!("urn:uuid:{}", article.id),
                 title: Text::plain(&article.title),
@@ -169,10 +245,18 @@ fn build_atom_feed(
                 content: Some(content),
                 categories,
                 published: Some(to_fixed(&article.generated_at)),
+                links: vec![entry_link],
                 ..Default::default()
             }
         })
         .collect();
+
+    let self_link = Link {
+        href: format!("{base_url}/feed/default/{}.atom", channel.slug),
+        rel: "self".to_string(),
+        mime_type: Some("application/atom+xml".to_string()),
+        ..Default::default()
+    };
 
     Feed {
         id: format!("urn:pail:channel:{}", channel.id),
@@ -180,6 +264,7 @@ fn build_atom_feed(
         subtitle: Some(Text::plain(&channel.name)),
         updated: feed_updated,
         entries,
+        links: vec![self_link],
         ..Default::default()
     }
 }
