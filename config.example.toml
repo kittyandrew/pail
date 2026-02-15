@@ -125,11 +125,15 @@ a digest covering 200 articles cannot give each one a full paragraph. However:
   - Public channels/groups (has @username): `https://t.me/<username>/<message_id>`
   - Private channels/groups (no username): `https://t.me/c/<numeric_id>/<message_id>`
   - Forum topics: `https://t.me/<username_or_c/id>/<topic_id>/<message_id>`
-- **Attribution:** Always identify who expressed a specific idea, argument, or shared content
-  by their username or display name. This is essential context — the reader needs to know who
-  said what. Format names in italics (e.g., `*Username*`) so they stand out visually. Attribute
-  each distinct viewpoint to its author, inline where the statement appears — do not summarize
-  a discussion without naming who said what.
+- **Attribution:** Always identify who expressed a specific idea, argument, or shared content.
+  This is essential context — the reader should never have to guess who said what. Format names
+  in italics (e.g., `*Channel Name*`, `*Username*`) so they stand out visually. For **channel
+  posts**, the channel name is the author — write `*Channel Name* reports that...`, not
+  "the post author." For **group messages**, use the sender's username or display name.
+  **Repetition rules:** Establish the full name on first reference. Within the same paragraph,
+  natural shortening is fine — abbreviations, "the channel," or "the author" are acceptable if
+  the name appeared in the immediately preceding sentence. Across paragraph boundaries,
+  re-establish the name explicitly — don't assume the reader remembers from paragraphs above.
 
 ## Output Format
 Write `output.md` with YAML frontmatter followed by the article body:
