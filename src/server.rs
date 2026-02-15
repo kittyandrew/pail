@@ -13,6 +13,7 @@ use crate::store;
 pub struct AppState {
     pub pool: SqlitePool,
     pub feed_token: String,
+    pub timezone: chrono_tz::Tz,
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -158,7 +159,8 @@ async fn article_handler(State(state): State<AppState>, Path(id): Path<String>) 
     };
 
     let title = html_escape(&article.title);
-    let date = article.generated_at.format("%Y-%m-%d %H:%M UTC");
+    let local_time = article.generated_at.with_timezone(&state.timezone);
+    let date = local_time.format("%b %-d %Y, %H:%M %Z");
 
     let html = format!(
         r#"<!DOCTYPE html>

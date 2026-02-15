@@ -56,9 +56,11 @@ pub async fn run(config: Config) -> Result<()> {
     let cleanup_handle = tokio::spawn(cleanup::cleanup_loop(pool.clone(), config.clone(), cancel.clone()));
 
     // Build and start HTTP server
+    let timezone: chrono_tz::Tz = config.pail.timezone.parse().expect("timezone already validated");
     let app_state = server::AppState {
         pool: pool.clone(),
         feed_token,
+        timezone,
     };
 
     let router = server::build_router(app_state);
