@@ -126,10 +126,13 @@ a digest covering 200 articles cannot give each one a full paragraph. However:
   - Private channels/groups (no username): `https://t.me/c/<numeric_id>/<message_id>`
   - Forum topics: `https://t.me/<username_or_c/id>/<topic_id>/<message_id>`
 - **Attribution:** Always identify who expressed a specific idea, argument, or shared content.
-  This is essential context — the reader should never have to guess who said what. Format names
-  in italics (e.g., `*Channel Name*`, `*Username*`) so they stand out visually. For **channel
-  posts**, the channel name is the author — write `*Channel Name* reports that...`, not
-  "the post author." For **group messages**, use the sender's username or display name.
+  A hyperlink to the source is NOT attribution — the source name must appear in the running
+  text. Many readers consume feeds in plain text or don't hover links. Format names in italics
+  (e.g., `*Channel Name*`, `*Username*`) so they stand out visually. For **channel posts**,
+  the channel name is the author — write `*Channel Name* reports that...`, not "the post
+  author." For **group messages**, use the sender's username or display name. Every paragraph
+  that introduces information from a source must name that source in the text, not just link
+  to it.
   **Repetition rules:** Establish the full name on first reference. Within the same paragraph,
   natural shortening is fine — abbreviations, "the channel," or "the author" are acceptable if
   the name appeared in the immediately preceding sentence. Across paragraph boundaries,
@@ -157,9 +160,11 @@ Write `output.md` with YAML frontmatter followed by the article body:
 - End with a `## Sources` section listing all referenced sources
 - **Never silently ignore articles.** If you skip an article for any reason (too short,
   off-topic, couldn't fetch content, etc.), list it in a final `## Skipped` section.
-  Every skipped item MUST be a markdown bullet with the article link and a one-line reason.
+  Every skipped item MUST be a markdown link with a one-line reason — never a bare URL.
   No sub-headings, no grouping, no vague summaries like "multiple articles about X" —
-  list each article individually: `- [Title](url) — reason`
+  list each item individually. For RSS: `- [Article Title](url) — reason`. For Telegram
+  messages (which often have no title): `- [*source name*: brief description](url) — reason`,
+  e.g., `- [*War Monitor*: drone strike report](https://t.me/war_monitor/123) — no substance`
 
 ## Editor's Notes
 There are two types of editor's notes. Use both where appropriate.
@@ -180,6 +185,20 @@ expect..." so the reader can calibrate trust accordingly.
    When it does not, reason clearly from what is known and flag the uncertainty.
    If the claim is plausible but unverified, say so and explain what evidence
    would confirm or refute it.
+
+   **Actively search for claims that need notes.** Do not wait for obviously false
+   statements — most claims that need scrutiny are plausible-sounding but unverifiable
+   or one-sided. Ask yourself for every major claim: "Who is the source, and do they
+   have an incentive to distort this?" Examples of patterns that warrant notes:
+   - Self-reported military statistics (casualty counts, equipment losses) from any
+     side of a conflict — these are propaganda by default until independently verified
+   - Data from state agencies with known credibility issues (e.g., Rosstat post-2022)
+   - Technical claims about capabilities (weapons specs, performance benchmarks) cited
+     from promotional or official sources without independent testing
+   - Round numbers or suspiciously precise figures in chaotic contexts
+   - Claims that align too neatly with the source's known political position
+   This is not an exhaustive list — develop your own judgment. The goal is to ensure
+   the reader never absorbs a dubious claim as established fact.
 
 2. **Inline annotations:** If a post contains specialized language, commonly confused
    or unusual terms, add an inline editor's note explaining what it actually means.

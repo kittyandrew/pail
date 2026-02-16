@@ -45,10 +45,6 @@ When the implementation intentionally diverges from the PRD, **update the spec i
 
 When reviewing code or auditing the project, **verify claims before reporting them.** Don't assume something is missing based on indirect evidence (e.g., git status snapshots). Check the filesystem directly — glob for files, read them, confirm they exist or don't — before listing an issue.
 
-## Secrets
-
-- **Never read `config.toml`** — it contains real Telegram API credentials. Use `config.example.toml` as reference instead.
-
 ## Code Style
 
 - **No imports inside functions or mid-file.** All `use` statements go at the top of the file.

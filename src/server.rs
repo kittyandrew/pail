@@ -162,6 +162,14 @@ async fn article_handler(State(state): State<AppState>, Path(id): Path<String>) 
     let local_time = article.generated_at.with_timezone(&state.timezone);
     let date = local_time.format("%b %-d %Y, %H:%M %Z");
 
+    // The body_html starts with <h1>Title</h1> (from markdown "# Title").
+    // Strip it to avoid duplicating the template's <h1>.
+    let body_html = article.body_html.trim_start();
+    let body = match body_html.strip_prefix("<h1>") {
+        Some(rest) => rest.find("</h1>").map(|i| &rest[i + 5..]).unwrap_or(body_html),
+        None => body_html,
+    };
+
     let html = format!(
         r#"<!DOCTYPE html>
 <html lang="en">
@@ -183,7 +191,6 @@ blockquote {{ border-left: 3px solid #ddd; margin-left: 0; padding-left: 1rem; c
 {body}
 </body>
 </html>"#,
-        body = article.body_html,
     );
 
     Html(html).into_response()
