@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -15,6 +15,96 @@ use crate::config::{Config, OutputChannelConfig};
 use crate::error::GenerationError;
 use crate::models::{ContentItem, GeneratedArticle, OutputChannel, Source};
 
+/// Key for grouping content items in the workspace.
+/// Non-folder sources group by source_id; folder sources split into per-channel groups.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum SourceKey {
+    Source(String),
+    FolderChannel { source_id: String, chat_id: i64 },
+}
+
+/// Info needed to write a source file's frontmatter and filename.
+struct SourceFileInfo {
+    name: String,
+    source_type: String,
+    description: String,
+    slug: String,
+}
+
+/// Classify a content item into its SourceKey, splitting folder items by chat_id.
+fn item_source_key(item: &ContentItem, source_map: &HashMap<String, &Source>) -> SourceKey {
+    let source = source_map.get(&item.source_id);
+    let is_folder = source.is_some_and(|s| s.source_type == "telegram_folder");
+    if is_folder {
+        let meta: serde_json::Value = serde_json::from_str(&item.metadata).unwrap_or_default();
+        let chat_id = meta.get("chat_id").and_then(|v| v.as_i64()).unwrap_or(0);
+        SourceKey::FolderChannel {
+            source_id: item.source_id.clone(),
+            chat_id,
+        }
+    } else {
+        SourceKey::Source(item.source_id.clone())
+    }
+}
+
+/// Build SourceFileInfo for each SourceKey that has items.
+fn build_source_file_infos(
+    keys: &[SourceKey],
+    source_map: &HashMap<String, &Source>,
+    folder_channels: &HashMap<String, HashMap<i64, (String, Option<String>)>>,
+) -> HashMap<SourceKey, SourceFileInfo> {
+    // Track slug usage for dedup
+    let mut slug_counts: HashMap<String, usize> = HashMap::new();
+    let mut result = HashMap::new();
+
+    // Sort keys for deterministic slug assignment
+    let mut sorted_keys = keys.to_vec();
+    sorted_keys.sort_by(|a, b| format!("{a:?}").cmp(&format!("{b:?}")));
+
+    for key in &sorted_keys {
+        let (name, source_type, description) = match key {
+            SourceKey::Source(id) => {
+                let source = source_map.get(id);
+                (
+                    source.map(|s| s.name.clone()).unwrap_or_else(|| "Unknown".to_string()),
+                    source
+                        .map(|s| s.source_type.clone())
+                        .unwrap_or_else(|| "unknown".to_string()),
+                    source.and_then(|s| s.description.clone()).unwrap_or_default(),
+                )
+            }
+            SourceKey::FolderChannel { source_id, chat_id } => {
+                let channel_info = folder_channels.get(source_id).and_then(|m| m.get(chat_id));
+                let ch_name = channel_info
+                    .map(|(n, _)| n.clone())
+                    .unwrap_or_else(|| format!("Channel {chat_id}"));
+                (ch_name, "telegram_channel".to_string(), String::new())
+            }
+        };
+
+        let base_slug = slug_from_name(&name);
+        let count = slug_counts.entry(base_slug.clone()).or_default();
+        let slug = if *count == 0 {
+            base_slug.clone()
+        } else {
+            format!("{base_slug}-{}", *count + 1)
+        };
+        *count += 1;
+
+        result.insert(
+            key.clone(),
+            SourceFileInfo {
+                name,
+                source_type,
+                description,
+                slug,
+            },
+        );
+    }
+
+    result
+}
+
 /// Generate a digest article for a channel.
 /// Returns (article, raw_output) where raw_output is the exact content of output.md.
 #[allow(clippy::too_many_arguments)]
@@ -24,6 +114,7 @@ pub async fn generate_article(
     channel: &OutputChannel,
     items: &[ContentItem],
     source_map: &HashMap<String, &Source>,
+    folder_channels: &HashMap<String, HashMap<i64, (String, Option<String>)>>,
     covers_from: DateTime<Utc>,
     covers_to: DateTime<Utc>,
     cancel: CancellationToken,
@@ -37,8 +128,14 @@ pub async fn generate_article(
     let ws_path = workspace.path();
     info!(workspace = %ws_path.display(), "preparing generation workspace");
 
-    // Compute disambiguated slugs for each source (used by both manifest and workspace dirs)
-    let source_slugs = compute_source_slugs(source_map);
+    // Build source keys and file info for workspace generation
+    let keys: Vec<SourceKey> = items
+        .iter()
+        .map(|item| item_source_key(item, source_map))
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    let file_infos = build_source_file_infos(&keys, source_map, folder_channels);
 
     // Write workspace files
     write_manifest(
@@ -46,7 +143,7 @@ pub async fn generate_article(
         channel_config,
         items,
         source_map,
-        &source_slugs,
+        &file_infos,
         covers_from,
         covers_to,
         &config.pail.timezone,
@@ -58,7 +155,7 @@ pub async fn generate_article(
         .await
         .context("writing prompt")?;
 
-    write_source_content(ws_path, items, source_map, &source_slugs)
+    write_source_content(ws_path, items, source_map, &file_infos)
         .await
         .context("writing source content")?;
 
@@ -108,10 +205,22 @@ pub async fn generate_article(
         return Err(GenerationError::OutputParse("output.md is empty".to_string()).into());
     }
 
-    let (title, topics, body_markdown) = parse_output(&output_content).context("parsing output")?;
+    let (title, topics, mut body_markdown) = parse_output(&output_content).context("parsing output")?;
+
+    // Append opencode session share link if present in generation log
+    let share_suffix = extract_share_url(&generation_log).map(|url| format!("\n\n---\n\n[opencode session]({url})\n"));
+    if let Some(ref suffix) = share_suffix {
+        body_markdown.push_str(suffix);
+    }
 
     // Convert markdown to HTML
     let body_html = markdown_to_html(&body_markdown);
+
+    // Also append to raw output so --output file includes the link
+    let mut output_content = output_content;
+    if let Some(ref suffix) = share_suffix {
+        output_content.push_str(suffix);
+    }
 
     let content_item_ids: Vec<String> = items.iter().map(|i| i.id.clone()).collect();
 
@@ -135,59 +244,36 @@ pub async fn generate_article(
     Ok((article, output_content))
 }
 
-/// Compute disambiguated slugs for each source, ensuring no two sources share a directory name.
-fn compute_source_slugs(source_map: &HashMap<String, &Source>) -> HashMap<String, String> {
-    let mut slug_counts: HashMap<String, usize> = HashMap::new();
-    let mut result: HashMap<String, String> = HashMap::new();
-
-    // Sort by source name for deterministic slug assignment when names collide
-    let mut entries: Vec<_> = source_map.iter().collect();
-    entries.sort_by_key(|(_, source)| &source.name);
-
-    for (id, source) in entries {
-        let base_slug = slug_from_name(&source.name);
-        let count = slug_counts.entry(base_slug.clone()).or_default();
-        let slug = if *count == 0 {
-            base_slug.clone()
-        } else {
-            format!("{base_slug}-{}", *count + 1)
-        };
-        *count += 1;
-        result.insert(id.clone(), slug);
-    }
-
-    result
-}
-
 #[allow(clippy::too_many_arguments)]
 async fn write_manifest(
     ws_path: &Path,
     channel_config: &OutputChannelConfig,
     items: &[ContentItem],
     source_map: &HashMap<String, &Source>,
-    source_slugs: &HashMap<String, String>,
+    file_infos: &HashMap<SourceKey, SourceFileInfo>,
     covers_from: DateTime<Utc>,
     covers_to: DateTime<Utc>,
     timezone: &str,
 ) -> Result<()> {
-    // Count items per source
-    let mut source_item_counts: HashMap<&str, usize> = HashMap::new();
+    // Count items per source key
+    let mut key_item_counts: HashMap<SourceKey, usize> = HashMap::new();
     for item in items {
-        *source_item_counts.entry(&item.source_id).or_default() += 1;
+        let key = item_source_key(item, source_map);
+        *key_item_counts.entry(key).or_default() += 1;
     }
 
-    // Sort by source name for deterministic manifest output
-    let mut sorted_sources: Vec<_> = source_map.iter().collect();
-    sorted_sources.sort_by_key(|(_, source)| &source.name);
+    // Sort by name for deterministic manifest output
+    let mut sorted_infos: Vec<_> = file_infos.iter().collect();
+    sorted_infos.sort_by_key(|(_, info)| &info.name);
 
-    let sources_json: Vec<serde_json::Value> = sorted_sources
+    let sources_json: Vec<serde_json::Value> = sorted_infos
         .into_iter()
-        .map(|(id, source)| {
+        .map(|(key, info)| {
             serde_json::json!({
-                "slug": source_slugs.get(id).cloned().unwrap_or_else(|| slug_from_name(&source.name)),
-                "name": source.name,
-                "type": source.source_type,
-                "item_count": source_item_counts.get(id.as_str()).unwrap_or(&0),
+                "slug": info.slug,
+                "name": info.name,
+                "type": info.source_type,
+                "item_count": key_item_counts.get(key).unwrap_or(&0),
             })
         })
         .collect();
@@ -235,12 +321,13 @@ async fn write_source_content(
     ws_path: &Path,
     items: &[ContentItem],
     source_map: &HashMap<String, &Source>,
-    source_slugs: &HashMap<String, String>,
+    file_infos: &HashMap<SourceKey, SourceFileInfo>,
 ) -> Result<()> {
-    // Group items by source
-    let mut items_by_source: HashMap<&str, Vec<&ContentItem>> = HashMap::new();
+    // Group items by source key
+    let mut items_by_key: HashMap<SourceKey, Vec<&ContentItem>> = HashMap::new();
     for item in items {
-        items_by_source.entry(&item.source_id).or_default().push(item);
+        let key = item_source_key(item, source_map);
+        items_by_key.entry(key).or_default().push(item);
     }
 
     let sources_dir = ws_path.join("sources");
@@ -248,28 +335,22 @@ async fn write_source_content(
         .await
         .map_err(GenerationError::Workspace)?;
 
-    for (source_id, source_items) in &items_by_source {
-        let source = match source_map.get(*source_id) {
-            Some(s) => s,
+    for (key, source_items) in &items_by_key {
+        let info = match file_infos.get(key) {
+            Some(i) => i,
             None => {
-                warn!(source_id = %source_id, "unknown source ID, skipping");
+                warn!(key = ?key, "no file info for source key, skipping");
                 continue;
             }
         };
 
-        let slug = source_slugs
-            .get(*source_id)
-            .cloned()
-            .unwrap_or_else(|| slug_from_name(&source.name));
-
         // Build flat file: YAML frontmatter + content items
-        // Source names and descriptions are validated at config load time to contain only
-        // safe characters (no control chars, quotes, or backslashes), so no escaping needed.
-        let description = source.description.as_deref().unwrap_or("");
+        // Channel names from tg_folder_channels may contain quotes, so escape them.
+        let escaped_name = info.name.replace('"', r#"\""#);
+        let escaped_desc = info.description.replace('"', r#"\""#);
         let mut content = format!(
-            "---\nname: \"{}\"\ntype: {}\nitem_count: {}\ndescription: \"{description}\"\n---\n\n",
-            source.name,
-            source.source_type,
+            "---\nname: \"{escaped_name}\"\ntype: {}\nitem_count: {}\ndescription: \"{escaped_desc}\"\n---\n\n",
+            info.source_type,
             source_items.len(),
         );
 
@@ -280,12 +361,12 @@ async fn write_source_content(
             }
         }
 
-        let filename = format!("{slug}.md");
+        let filename = format!("{}.md", info.slug);
         tokio::fs::write(sources_dir.join(&filename), &content)
             .await
             .map_err(GenerationError::Workspace)?;
 
-        debug!(source = %source.name, items = source_items.len(), "wrote source content");
+        debug!(source = %info.name, items = source_items.len(), "wrote source content");
     }
 
     Ok(())
@@ -389,6 +470,9 @@ async fn invoke_opencode(
         .arg("--")
         .arg(prompt)
         .current_dir(workspace)
+        // Enable opencode's Exa-powered websearch tool so the model can verify
+        // facts and find real URLs instead of hallucinating from training data.
+        .env("OPENCODE_ENABLE_EXA", "1")
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
 
@@ -476,6 +560,17 @@ async fn read_child_pipes(
         String::new()
     };
     (stdout_str, stderr_str)
+}
+
+fn extract_share_url(generation_log: &str) -> Option<String> {
+    const PREFIX: &str = "https://opncd.ai/share/";
+    let start = generation_log.find(PREFIX)?;
+    let rest = &generation_log[start..];
+    // URL ends at the first character that isn't valid in a URL path segment
+    let end = rest
+        .find(|c: char| c.is_whitespace() || c.is_control() || c == '\x1b')
+        .unwrap_or(rest.len());
+    Some(rest[..end].to_string())
 }
 
 fn parse_output(content: &str) -> Result<(String, Vec<String>, String)> {

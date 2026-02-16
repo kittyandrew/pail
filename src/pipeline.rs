@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use sqlx::SqlitePool;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
@@ -10,6 +10,14 @@ use grammers_client::Client;
 
 use crate::config::{Config, OutputChannelConfig};
 use crate::{fetch, fetch_tg, generate, models, store, telegram};
+
+/// How to determine the generation time window.
+pub enum TimeWindow {
+    /// Relative duration from now (e.g., --since 7d).
+    Since(Duration),
+    /// Exact timestamps (e.g., --from ... --to ...).
+    Explicit { from: DateTime<Utc>, to: DateTime<Utc> },
+}
 
 /// Result of a successful pipeline run.
 pub struct PipelineResult {
@@ -27,7 +35,7 @@ pub async fn run_generation(
     pool: &SqlitePool,
     config: &Config,
     channel_config: &OutputChannelConfig,
-    since_override: Option<Duration>,
+    time_window: Option<TimeWindow>,
     fetch_content: bool,
     tg_client: Option<&Client>,
     cancel: CancellationToken,
@@ -59,18 +67,26 @@ pub async fn run_generation(
 
     // Determine time window (needed before fetching so TG history knows the boundary)
     let now = Utc::now();
-    let since_duration = since_override.map(|d| chrono::Duration::from_std(d).unwrap_or(chrono::Duration::days(7)));
-    let covers_from = if let Some(duration) = since_duration {
-        now - duration
-    } else if let Some(ref last_gen) = channel.last_generated {
-        *last_gen
-    } else {
-        now - chrono::Duration::days(7)
+    let is_override = time_window.is_some();
+    let (covers_from, covers_to) = match time_window {
+        Some(TimeWindow::Since(d)) => {
+            let duration = chrono::Duration::from_std(d).unwrap_or(chrono::Duration::days(7));
+            (now - duration, now)
+        }
+        Some(TimeWindow::Explicit { from, to }) => (from, to),
+        None => {
+            let from = if let Some(ref last_gen) = channel.last_generated {
+                *last_gen
+            } else {
+                now - chrono::Duration::days(7)
+            };
+            (from, now)
+        }
     };
 
     info!(
         from = %covers_from.to_rfc3339(),
-        to = %now.to_rfc3339(),
+        to = %covers_to.to_rfc3339(),
         "content time window"
     );
 
@@ -127,7 +143,7 @@ pub async fn run_generation(
         }
     }
 
-    let items = store::get_items_in_window(pool, &source_ids, covers_from, now)
+    let items = store::get_items_in_window(pool, &source_ids, covers_from, covers_to)
         .await
         .context("querying content items")?;
 
@@ -136,13 +152,13 @@ pub async fn run_generation(
         warn!(
             channel = %channel.name,
             from = %covers_from.to_rfc3339(),
-            to = %now.to_rfc3339(),
+            to = %covers_to.to_rfc3339(),
             sources = ?source_names,
             "no content items in time window, skipping generation"
         );
         // Update last_generated so the next run doesn't re-check this empty window (PRD §9.7)
-        if since_override.is_none() {
-            store::update_last_generated(pool, &channel.id, now)
+        if !is_override {
+            store::update_last_generated(pool, &channel.id, covers_to)
                 .await
                 .context("updating last_generated")?;
         }
@@ -153,6 +169,20 @@ pub async fn run_generation(
 
     let source_map: std::collections::HashMap<String, &models::Source> =
         sources.iter().map(|s| (s.id.clone(), s)).collect();
+
+    // Gather folder channel maps for per-channel workspace splitting
+    let mut folder_channels: std::collections::HashMap<
+        String,
+        std::collections::HashMap<i64, (String, Option<String>)>,
+    > = std::collections::HashMap::new();
+    for source in &sources {
+        if source.source_type == "telegram_folder" {
+            let channels = store::get_folder_channel_map(pool, &source.id)
+                .await
+                .context("getting folder channel map")?;
+            folder_channels.insert(source.id.clone(), channels);
+        }
+    }
 
     if cancel.is_cancelled() {
         return Ok(None);
@@ -182,8 +212,9 @@ pub async fn run_generation(
             &channel,
             &items,
             &source_map,
+            &folder_channels,
             covers_from,
-            now,
+            covers_to,
             cancel.clone(),
         )
         .await
@@ -218,9 +249,9 @@ pub async fn run_generation(
         }
     }
 
-    // Update last_generated (skip for --since overrides)
-    if since_override.is_none() {
-        store::update_last_generated(pool, &channel.id, now)
+    // Update last_generated (skip for --since/--from/--to overrides)
+    if !is_override {
+        store::update_last_generated(pool, &channel.id, covers_to)
             .await
             .context("updating last_generated")?;
     }

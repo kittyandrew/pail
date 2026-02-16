@@ -44,12 +44,31 @@ async fn main() -> Result<()> {
         Some(Commands::Validate) => {
             println!("Configuration is valid.");
         }
-        Some(Commands::Generate { slug, output, since }) => {
-            let since_duration = if let Some(ref since_str) = since {
-                Some(
-                    humantime::parse_duration(since_str)
-                        .with_context(|| format!("invalid --since duration: '{since_str}'"))?,
-                )
+        Some(Commands::Generate {
+            slug,
+            output,
+            since,
+            from,
+            to,
+        }) => {
+            let time_window = if let Some(ref since_str) = since {
+                let duration = humantime::parse_duration(since_str)
+                    .with_context(|| format!("invalid --since duration: '{since_str}'"))?;
+                Some(pipeline::TimeWindow::Since(duration))
+            } else if let (Some(from_str), Some(to_str)) = (&from, &to) {
+                let from_dt = chrono::DateTime::parse_from_rfc3339(from_str)
+                    .with_context(|| format!("invalid --from timestamp: '{from_str}' (expected RFC 3339)"))?
+                    .to_utc();
+                let to_dt = chrono::DateTime::parse_from_rfc3339(to_str)
+                    .with_context(|| format!("invalid --to timestamp: '{to_str}' (expected RFC 3339)"))?
+                    .to_utc();
+                if from_dt >= to_dt {
+                    anyhow::bail!("--from must be before --to");
+                }
+                Some(pipeline::TimeWindow::Explicit {
+                    from: from_dt,
+                    to: to_dt,
+                })
             } else {
                 None
             };
@@ -111,16 +130,9 @@ async fn main() -> Result<()> {
 
             let tg_client_ref = tg_conn.as_ref().map(|c| &c.client);
 
-            let result = pipeline::run_generation(
-                &pool,
-                &config,
-                channel_config,
-                since_duration,
-                true,
-                tg_client_ref,
-                cancel,
-            )
-            .await?;
+            let result =
+                pipeline::run_generation(&pool, &config, channel_config, time_window, true, tg_client_ref, cancel)
+                    .await?;
 
             match result {
                 Some(r) => {

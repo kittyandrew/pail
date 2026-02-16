@@ -80,8 +80,18 @@ All input data is in the current directory:
 3. Read each source's content files in `sources/`.
 4. Handle each source type according to the rules below (§ RSS Sources, § Telegram Sources).
 5. For large inputs, consider summarizing per-source first, then synthesizing.
-6. Write the final article to `output.md`.
-7. Re-read your output and iterate if the quality is insufficient.
+6. **Research before writing.** Before you write the article, identify claims that need
+   editor's notes. For each one, use `websearch` to find current facts and real URLs.
+   Use `webfetch` to verify any URLs you plan to include that did not come from the source
+   files. Do this NOW, not after writing — an editor's note without a verified source is
+   just a vague caveat and adds no value.
+7. Write the final article to `output.md`.
+8. **Post-write URL audit.** Collect every URL in your article that did NOT come from the
+   source content files. For each one, call `webfetch(url="<the URL>")`. If it returns a
+   404 or error, use `websearch` to find the correct source, then rewrite the note or
+   passage with a verified link. If no source exists, remove the unsourced claim entirely —
+   do not leave a dead link or an unsubstantiated statement. Update `output.md`.
+9. Re-read your output and iterate if the quality is insufficient.
 
 ## Condensation and Fidelity
 As source volume grows, you will need to condense more aggressively. This is expected —
@@ -133,6 +143,9 @@ a digest covering 200 articles cannot give each one a full paragraph. However:
   author." For **group messages**, use the sender's username or display name. Every paragraph
   that introduces information from a source must name that source in the text, not just link
   to it.
+  WRONG: `[An air alert was declared](https://t.me/kyivoda/123) across the region` — this
+  names no source. RIGHT: `*Kyiv ODA* [declared an air alert](https://t.me/kyivoda/123)
+  across the region` — the source is visible even in plain text.
   **Repetition rules:** Establish the full name on first reference. Within the same paragraph,
   natural shortening is fine — abbreviations, "the channel," or "the author" are acceptable if
   the name appeared in the immediately preceding sentence. Across paragraph boundaries,
@@ -157,14 +170,27 @@ Write `output.md` with YAML frontmatter followed by the article body:
 - Synthesize related ideas across posts, find connections
 - Use inline links `[text](url)` to reference original articles/messages
 - Link to original articles. Skip anything that's just a short announcement with no substance
-- End with a `## Sources` section listing all referenced sources
-- **Never silently ignore articles.** If you skip an article for any reason (too short,
-  off-topic, couldn't fetch content, etc.), list it in a final `## Skipped` section.
-  Every skipped item MUST be a markdown link with a one-line reason — never a bare URL.
-  No sub-headings, no grouping, no vague summaries like "multiple articles about X" —
-  list each item individually. For RSS: `- [Article Title](url) — reason`. For Telegram
-  messages (which often have no title): `- [*source name*: brief description](url) — reason`,
-  e.g., `- [*War Monitor*: drone strike report](https://t.me/war_monitor/123) — no substance`
+- End with a `## Skipped` section for items you did not cover (see below).
+  Do NOT add a separate "Sources" section — all sources are already attributed and linked inline.
+- **Language consistency:** If the editorial directive specifies a language, the ENTIRE article
+  must be in that language — including section headers like Skipped. Do not mix
+  languages. If the article is in Ukrainian, write `## Проігноровано`, not `## Skipped`.
+- **Never silently ignore content.** If you skip something for any reason (too short,
+  off-topic, couldn't fetch content, etc.), account for it in the `## Skipped` section.
+  **For RSS feeds:** list each skipped article individually as `- [Article Title](url) — reason`.
+  **For Telegram sources:** group skipped messages by source, one line per source with a count
+  and the dominant reason. Do NOT list every message individually — Telegram channels often
+  post dozens of small messages (air raid alerts, photos, reactions) and per-message listing
+  creates a skipped section longer than the article.
+  Format: `- *Source Name* — N messages (reason)`.
+  If a source has messages skipped for different reasons, you may split into 2-3 lines:
+  `- *Source Name* — 14 messages (air raid alerts)` and `- *Source Name* — 2 messages (weather)`.
+  For sources where only 1-2 messages were skipped, a simple one-liner is fine:
+  `- *Source Name* — 1 message (no substance)`.
+  The source name comes from the source file's YAML frontmatter `name` field — use it for
+  every item, including private groups and channels (they all have names in the frontmatter).
+  WRONG: `- *приватний чат* — 5 messages (chat activity)` — "приватний чат" is not a name;
+  use the actual group name from the source frontmatter.
 
 ## Editor's Notes
 There are two types of editor's notes. Use both where appropriate.
@@ -185,6 +211,23 @@ expect..." so the reader can calibrate trust accordingly.
    When it does not, reason clearly from what is known and flag the uncertainty.
    If the claim is plausible but unverified, say so and explain what evidence
    would confirm or refute it.
+
+   **No unsourced data in editor's notes.** If your note includes specific numbers,
+   technical specs, dates, timelines, or factual claims of any kind, you MUST either
+   link to a source you verified or explicitly state where the data comes from (e.g.,
+   "according to the manufacturer's specification" or "per IISS Military Balance").
+   This includes biographical facts (tenure dates, positions held), event dates
+   ("the investigation began in November 2025"), and general credibility claims
+   ("independent analysts have pointed to discrepancies" — which analysts?).
+   If you cannot name a source, do not state the claim. The reader cannot verify
+   unsourced facts and has no reason to trust them — no matter how confident you
+   are in your own knowledge.
+
+   **Never trust your training data over source material.** Your training data has a
+   knowledge cutoff. People change positions, organizations restructure, facts on the
+   ground shift. Before writing any editor's note that contradicts or "corrects" what
+   a source says, use `websearch` to verify who is right. If you cannot verify, do not
+   write the note — a confidently wrong "correction" is worse than no note at all.
 
    **Actively search for claims that need notes.** Do not wait for obviously false
    statements — most claims that need scrutiny are plausible-sounding but unverifiable
@@ -222,17 +265,14 @@ expect..." so the reader can calibrate trust accordingly.
 - When an article mentions a specific claim with a source, link directly to that source,
   not just to the article making the claim
 
-## Link Verification — CRITICAL
-**NEVER include a URL you have not verified.** Every hyperlink in the article — whether
-in the main body, editor's notes, or inline annotations — must be either:
-1. A URL that appeared in the source content files (already verified by pail), OR
-2. A URL you have fetched yourself during this session and confirmed returns real content
+## Link Verification
+**NEVER include a URL you have not verified.** Every hyperlink must be either:
+1. A URL from the source content files (already verified by pail), OR
+2. A URL you fetched yourself with `webfetch` in THIS session and confirmed returns real content
 
-If you want to reference something in an editor's note (a study, a dataset, a counter-argument),
-you MUST fetch the URL first to confirm it exists and says what you claim it says. If you cannot
-find a working URL, either omit the reference or state the claim without a link and note that
-you could not locate a primary source. A fabricated link is worse than no link — it destroys
-reader trust in the entire digest.
+URLs from your training data are NOT verified — LLMs routinely hallucinate plausible-looking
+URLs that return 404. You are not exempt. If you did not fetch it in this session, do not
+include it. A fabricated link destroys reader trust in the entire digest.
 
 ## Writing Style
 - Write like a Reuters correspondent. Avoid typical AI-smell like em-dash saturation

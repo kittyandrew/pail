@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use sqlx::SqlitePool;
@@ -586,6 +588,29 @@ pub async fn get_folder_channels_with_info(
     .await
     .context("querying folder channels with info")?;
     Ok(rows)
+}
+
+/// Get a map of channel_tg_id → (channel_name, channel_username) for a folder source.
+/// Used during workspace generation to split folder items into per-channel source files.
+pub async fn get_folder_channel_map(
+    pool: &SqlitePool,
+    folder_source_id: &str,
+) -> Result<HashMap<i64, (String, Option<String>)>> {
+    let rows: Vec<(i64, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT channel_tg_id, channel_name, channel_username FROM tg_folder_channels WHERE folder_source_id = ? AND enabled = 1",
+    )
+    .bind(folder_source_id)
+    .fetch_all(pool)
+    .await
+    .context("querying folder channel map")?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(tg_id, name, username)| {
+            let display_name = name.unwrap_or_else(|| format!("Channel {tg_id}"));
+            (tg_id, (display_name, username))
+        })
+        .collect())
 }
 
 /// Get all folder channel entries: (source_id, channel_tg_id) for building the subscription map.
