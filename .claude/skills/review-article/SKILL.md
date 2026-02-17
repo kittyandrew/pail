@@ -2,7 +2,7 @@
 name: review-article
 description: Fetch (or generate) a pail article and review it for quality and system prompt compliance.
 disable-model-invocation: false
-allowed-tools: Read, Glob, Grep, Bash(command:curl *), Bash(command:cargo *), Bash(command:grep *), Bash(command:wc *), Bash(command:sqlite3 *), Bash(command:opencode *), Bash(command:nix-shell *), WebFetch, WebSearch, AskUserQuestion
+allowed-tools: Read, Glob, Grep, Bash(command:curl *), Bash(command:cargo *), Bash(command:grep *), Bash(command:wc *), Bash(command:sqlite3 *), Bash(command:opencode *), Bash(command:nix-shell *), Bash(command:gh *), WebFetch, WebSearch, AskUserQuestion
 argument-hint: "[feed-slug, article-url, or empty for interactive]"
 ---
 
@@ -20,8 +20,14 @@ You are reviewing a generated pail digest article for quality and compliance wit
 
 - If `$ARGUMENTS` is a full URL (starts with `http`), fetch it with `curl -s` and save to `/tmp/pail-review-article.html`.
 - If `$ARGUMENTS` is a feed slug (e.g., `tg-news`), read the feed token from `config.toml` (`grep '^feed_token' config.toml`), fetch the feed from the deployed instance, extract the latest article's `<link rel="alternate">` URL, then fetch that.
+- If `$ARGUMENTS` is `ci`, review the latest article from the CI generate workflow:
+  1. Find the latest run: `gh run list --workflow=generate.yml --limit 1 --json databaseId,status,conclusion`
+  2. If still running, poll until complete: `gh run view <id> --json status,conclusion`
+  3. Download the artifact: `gh run download <id> --name tech-digest-article --dir /tmp/pail-ci-article`
+  4. Read `/tmp/pail-ci-article/article.md`
 - If no argument is provided, ask the user interactively what they want to review. Read `config.toml` to find available output channel slugs (`grep '^slug' config.toml`) and offer these options:
   - Each available feed slug (fetch the latest article from the deployed instance)
+  - Review latest CI article (same as `ci` argument above)
   - Generate a new article (ask which slug and what `--since` duration, then run `cargo run --release -- generate`)
   - Provide a URL manually
 

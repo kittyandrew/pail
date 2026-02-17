@@ -46,7 +46,7 @@ version = 1
 
 # Default LLM model for generation (used when output_channel doesn't specify one)
 # See your opencode provider for available models.
-# default_model = "opencode/big-pickle"
+default_model = "opencode/kimi-k2.5-free"
 
 # Maximum time to wait for opencode to complete a generation
 # Accepts human-readable durations: "10m", "30m", "1h"
