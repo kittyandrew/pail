@@ -6,9 +6,10 @@
 
 ## Full Spec
 
-The complete PRD lives in the kittyos repo (not this repo):
+The complete PRD lives outside this repo (path varies by machine):
 ```
 ~/dev/kittyos/.notes/personal/pail/pail-prd.md
+~/dev/dotfiles/.notes/personal/pail/pail-prd.md
 ```
 
 **Always load the PRD into context** at the start of a session, after context compaction, or when continuing from a previous session — before writing ANY implementation code. This is a hard requirement: read the full PRD first, then implement. If the PRD is not in context, stop and read it before proceeding.
@@ -54,4 +55,4 @@ When reviewing code or auditing the project, **verify claims before reporting th
 - **Never stage or commit without explicit user confirmation.** After making changes, show the diff and wait for the user to approve before running `git add` or `git commit`.
 - **Never push to remote** unless the user explicitly asks in that moment. A one-time push approval does not carry forward to future pushes.
 - **Exception: `.claude/CLAUDE.md`** — always auto-stage this file after editing it.
-- **Never run git commands in the kittyos repo** (`~/dev/kittyos/`). You may edit files there (e.g., the PRD), but never stage, commit, or otherwise touch git in that repo.
+- **Never run git commands in the kittyos/dotfiles repo** (`~/dev/kittyos/` or `~/dev/dotfiles/`). You may edit files there (e.g., the PRD), but never stage, commit, or otherwise touch git in those repos.

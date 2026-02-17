@@ -96,10 +96,10 @@ To set a fixed token, add `feed_token = "my-secret"` to the `[pail]` config sect
 
 ## Docker
 
-Build the image with Nix and load it:
+Pull the image from [DockerHub](https://hub.docker.com/r/kittyandrew/pail):
 
 ```bash
-nix build .#docker && docker load < result
+docker pull kittyandrew/pail:latest
 ```
 
 Run with docker-compose:
@@ -123,6 +123,25 @@ docker compose up -d
 ```
 
 Alternatively, pass API keys as environment variables (see `docker-compose.yml`).
+
+Pin to a specific version or commit in `docker-compose.yml`:
+
+```yaml
+image: kittyandrew/pail:0.1.0        # semver
+image: kittyandrew/pail:sha-abc1234   # commit
+```
+
+Available tags are listed on [DockerHub](https://hub.docker.com/r/kittyandrew/pail/tags).
+
+<details>
+<summary>Building the image locally with Nix</summary>
+
+```bash
+nix build .#docker && docker load < result
+```
+
+This produces a `pail:<version>` image you can use directly in `docker-compose.yml`.
+</details>
 
 ## Reverse Proxy
 

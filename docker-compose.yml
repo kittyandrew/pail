@@ -1,9 +1,8 @@
-# Build the image first: nix build .#docker && docker load < result
 version: "3"
 services:
   pail:
     container_name: pail
-    image: pail:0.1.0
+    image: kittyandrew/pail:latest
     restart: always
     # Expose port for direct access (remove if using a reverse proxy on the same Docker network)
     ports:

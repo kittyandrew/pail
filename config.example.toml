@@ -55,7 +55,8 @@ version = 1
 # max_retries = 1
 
 # Additional CLI flags passed to `opencode run` (e.g., ["--format", "json"])
-# extra_args = []
+# Recommended: use "--variant", "max" for reasoning-capable models
+# extra_args = ["--variant", "max"]
 
 # System prompt template for digest generation. The {editorial_directive} placeholder
 # is replaced with each output channel's prompt field at render time.
@@ -409,11 +410,14 @@ sources = ["Hacker News", "Lobsters"]
 # Editorial directive — controls what the AI writes about and how.
 # This is the primary knob for tuning digest output.
 prompt = """
-Write a morning tech digest for a senior software engineer.
-Focus on: systems programming, AI/ML, NixOS, Rust, self-hosting.
-Skip: startup funding, crypto prices, social media drama.
-Add Editor's Notes for any claims that seem dubious.
 Write in English.
+Write a morning tech digest for a senior software engineer.
+
+My favourite people to follow are Jonathan Blow (jblow) and Casey Muratori.
+Please assume my views based on everything you know about these people.
+Be real and spicy in editorial notes when fact checking or evaluating articles, as much as you want. Do not cross a line into lies or dogma though.
+
+I'm somewhat interested in game dev, but more in systems programming, AI/ML, NixOS, Rust, self-hosting and general state of modern consumer software.
 """
 
 

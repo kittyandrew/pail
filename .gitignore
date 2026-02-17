@@ -6,3 +6,4 @@ config.toml
 .direnv/
 result
 digest.md
+article.md
