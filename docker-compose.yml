@@ -9,13 +9,19 @@ services:
       - "8080:8080"
     volumes:
       - ./config.toml:/etc/pail/config.toml:ro
-      - ./data/pail:/var/lib/pail
-      - ./data/opencode-auth:/root/.local/share/opencode
-      - ./data/opencode-config:/root/.config/opencode
-    # Option A: pass API keys as env vars (no opencode auth needed)
-    # environment:
-    #   - OPENAI_API_KEY=${OPENAI_API_KEY}
-    #   - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - pail-data:/var/lib/pail
+      - opencode-auth:/home/pail/.local/share/opencode
+      - opencode-config:/home/pail/.config/opencode
+    environment:
+      - PAIL_DATA_DIR=/var/lib/pail
+      # Option A: pass API keys as env vars (no opencode auth needed)
+      # - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+
+volumes:
+  pail-data:
+  opencode-auth:
+  opencode-config:
 
 # Uncomment to join an external Docker network (e.g., for a Caddy reverse proxy).
 # With this, remove the `ports` section above — Caddy connects via the network name.

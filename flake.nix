@@ -43,24 +43,28 @@
       };
     in {
       default = pail;
-      docker = pkgs.dockerTools.buildImage {
-        name = "pail";
-        tag = "0.1.0";
-        copyToRoot = pkgs.buildEnv {
-          name = "image-root";
-          paths = [pail opencodePkg pkgs.cacert];
+      docker = let
+        uid = "1000";
+        gid = "1000";
+        passwd = pkgs.writeTextDir "etc/passwd" "pail:x:${uid}:${gid}:pail:/home/pail:/bin/false\n";
+        group = pkgs.writeTextDir "etc/group" "pail:x:${gid}:\n";
+      in
+        pkgs.dockerTools.buildLayeredImage {
+          name = "pail";
+          tag = "0.1.0";
+          contents = [pail opencodePkg pkgs.cacert passwd group];
+          # fakeRootCommands runs under fakeroot so chown works in the Nix sandbox
+          fakeRootCommands = "mkdir -p tmp home/pail && chown ${uid}:${gid} home/pail";
+          config = {
+            Entrypoint = ["${pail}/bin/pail" "--config" "/etc/pail/config.toml"];
+            User = "${uid}:${gid}";
+            Env = [
+              "HOME=/home/pail"
+              "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
+            ];
+            ExposedPorts = {"8080/tcp" = {};};
+          };
         };
-        # Scratch image has no base filesystem — create dirs for workspaces and home
-        extraCommands = "mkdir -p tmp root";
-        config = {
-          Entrypoint = ["${pail}/bin/pail" "--config" "/etc/pail/config.toml"];
-          Env = [
-            "HOME=/root"
-            "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
-          ];
-          ExposedPorts = {"8080/tcp" = {};};
-        };
-      };
     });
 
     devShells = forEachSystem ({

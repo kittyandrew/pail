@@ -105,12 +105,8 @@ docker pull kittyandrew/pail:latest
 Run with docker-compose:
 
 ```bash
-# Create data directories
-mkdir -p data/pail data/opencode-auth data/opencode-config
-
-# Copy and edit config — set data_dir to match the Docker volume mount
+# Copy and edit config
 cp config.example.toml config.toml
-# In config.toml, change: data_dir = "/var/lib/pail"
 
 # Authenticate opencode (one-time, interactive)
 docker compose run --rm -it --entrypoint opencode pail auth login

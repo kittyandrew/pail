@@ -207,7 +207,13 @@ pub fn load_config(path: &Path) -> Result<Config> {
     let content = std::fs::read_to_string(path)
         .map_err(ConfigError::ReadFile)
         .context("reading config file")?;
-    let config: Config = toml::from_str(&content).map_err(ConfigError::Parse)?;
+    let mut config: Config = toml::from_str(&content).map_err(ConfigError::Parse)?;
+
+    // Allow env var to override data_dir (useful for Docker: set PAIL_DATA_DIR=/var/lib/pail)
+    if let Ok(dir) = std::env::var("PAIL_DATA_DIR") {
+        config.pail.data_dir = PathBuf::from(dir);
+    }
+
     Ok(config)
 }
 

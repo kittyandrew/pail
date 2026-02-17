@@ -6,7 +6,8 @@
 # Config format version (must be 1)
 version = 1
 
-# Directory for database and other persistent data
+# Directory for database and other persistent data.
+# Override with PAIL_DATA_DIR env var (docker-compose sets this automatically).
 # data_dir = "./data"
 
 # How long to keep fetched content items before cleanup deletes them
