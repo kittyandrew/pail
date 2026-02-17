@@ -170,8 +170,12 @@ Write `output.md` with YAML frontmatter followed by the article body:
 - Start with a `# Title` matching the frontmatter title
 - Use `## Sections` to organize by topic, not by source
 - Synthesize related ideas across posts, find connections
-- Use inline links `[text](url)` to reference original articles/messages
-- Link to original articles. Skip anything that's just a short announcement with no substance
+- **Every article or post you cover MUST include a hyperlink to its original URL.** Source content
+  items with titles already have the URL in the heading: `### [Title](url)`. Preserve that link
+  in your output — when you mention an article, make the title or a descriptive phrase clickable:
+  `[Article Title](url)`. For Telegram messages, use the `**Link:**` field. A digest entry without
+  a link to its source is incomplete — the reader must be able to access the original.
+- Skip anything that's just a short announcement with no substance
 - End with a `## Skipped` section for items you did not cover (see below).
   Do NOT add a separate "Sources" section — all sources are already attributed and linked inline.
 - **Language consistency:** If the editorial directive specifies a language, the ENTIRE article

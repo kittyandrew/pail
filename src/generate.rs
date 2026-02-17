@@ -385,8 +385,13 @@ fn format_content_item(item: &ContentItem) -> String {
     let media_type = meta.get("media_type").and_then(|v| v.as_str());
     let is_forward = item.content_type == "forward";
 
-    if let Some(ref title) = item.title {
-        md.push_str(&format!("### {title}\n\n"));
+    // Make the title a clickable link when URL is available — this makes the URL
+    // structurally part of the article identity, so the LLM is more likely to preserve
+    // it in the output rather than ignoring a separate **Link:** metadata field.
+    match (&item.title, &item.url) {
+        (Some(title), Some(url)) => md.push_str(&format!("### [{title}]({url})\n\n")),
+        (Some(title), None) => md.push_str(&format!("### {title}\n\n")),
+        _ => {}
     }
 
     md.push_str(&format!(
