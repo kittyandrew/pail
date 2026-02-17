@@ -88,6 +88,11 @@ async fn main() -> Result<()> {
                 .ok_or_else(|| anyhow::anyhow!("no output channel config for slug '{slug}'"))?;
 
             let cancel = tokio_util::sync::CancellationToken::new();
+            let cancel_signal = cancel.clone();
+            tokio::spawn(async move {
+                tokio::signal::ctrl_c().await.ok();
+                cancel_signal.cancel();
+            });
 
             // Check if this channel has TG sources
             let has_tg_sources = channel_config.sources.iter().any(|name| {

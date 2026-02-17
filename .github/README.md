@@ -172,6 +172,10 @@ schedule = "cron:0 8 * * *"            # 5-field cron expression (always UTC)
 
 `at:` and `weekly:` times are interpreted in the configured `timezone` (default: UTC). Cron expressions always evaluate in UTC.
 
+## Known Issues
+
+**Generation fails with some Anthropic models (opencode bug).** When the context window fills up during generation, opencode triggers auto-compaction and then the model stops instead of continuing — exiting with code 0 and an empty `output.md`. This is a known opencode issue with non-interactive `run` mode ([#11301](https://github.com/anomalyco/opencode/issues/11301), [opencode-ai#336](https://github.com/opencode-ai/opencode/issues/336)). Models that use context efficiently (e.g., Opus) or have larger effective windows (e.g., free `opencode/big-pickle`) are not affected. Sonnet and Haiku are most likely to hit this with large source sets.
+
 ## License
 
 [AGPL-3.0](../LICENSE)

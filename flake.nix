@@ -52,11 +52,11 @@
         pkgs.dockerTools.buildLayeredImage {
           name = "pail";
           tag = "0.1.0";
-          contents = [pail opencodePkg pkgs.cacert passwd group];
+          contents = [pail opencodePkg pkgs.cacert pkgs.tini passwd group];
           # fakeRootCommands runs under fakeroot so chown works in the Nix sandbox
           fakeRootCommands = "mkdir -p tmp home/pail && chown ${uid}:${gid} home/pail";
           config = {
-            Entrypoint = ["${pail}/bin/pail" "--config" "/etc/pail/config.toml"];
+            Entrypoint = ["${pkgs.tini}/bin/tini" "--" "${pail}/bin/pail" "--config" "/etc/pail/config.toml"];
             User = "${uid}:${gid}";
             Env = [
               "HOME=/home/pail"
