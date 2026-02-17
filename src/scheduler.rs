@@ -216,7 +216,11 @@ pub async fn scheduler_loop(
                 continue;
             }
 
-            let schedule = match Schedule::parse(&channel.schedule) {
+            let schedule_str = match &channel.schedule {
+                Some(s) => s,
+                None => continue, // no schedule — CLI-only channel
+            };
+            let schedule = match Schedule::parse(schedule_str) {
                 Ok(s) => s,
                 Err(e) => {
                     warn!(channel = %channel.name, error = %e, "invalid schedule, skipping");

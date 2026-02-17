@@ -133,7 +133,7 @@ pub async fn upsert_output_channel(
              WHERE id = ?",
         )
         .bind(&channel.name)
-        .bind(&channel.schedule)
+        .bind(channel.schedule.as_deref())
         .bind(&channel.prompt)
         .bind(&channel.model)
         .bind(&channel.language)
@@ -154,7 +154,7 @@ pub async fn upsert_output_channel(
         .bind(&id)
         .bind(&channel.name)
         .bind(&channel.slug)
-        .bind(&channel.schedule)
+        .bind(channel.schedule.as_deref())
         .bind(&channel.prompt)
         .bind(&channel.model)
         .bind(&channel.language)

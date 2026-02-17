@@ -176,7 +176,7 @@ pub struct SourceAuthConfig {
 pub struct OutputChannelConfig {
     pub name: String,
     pub slug: String,
-    pub schedule: String,
+    pub schedule: Option<String>,
     pub sources: Vec<String>,
     pub prompt: String,
     pub model: Option<String>,
@@ -439,9 +439,11 @@ pub fn validate_config(config: &Config) -> Result<()> {
             }
         }
 
-        // Validate schedule expression
-        validate_schedule(&channel.schedule)
-            .map_err(|e| ConfigError::Validation(format!("output channel '{}': {}", channel.name, e)))?;
+        // Validate schedule expression (if present)
+        if let Some(ref schedule) = channel.schedule {
+            validate_schedule(schedule)
+                .map_err(|e| ConfigError::Validation(format!("output channel '{}': {}", channel.name, e)))?;
+        }
     }
 
     // Validate timezone

@@ -33,7 +33,7 @@ pub struct OutputChannel {
     pub id: String,
     pub name: String,
     pub slug: String,
-    pub schedule: String,
+    pub schedule: Option<String>,
     pub prompt: String,
     pub model: Option<String>,
     pub language: Option<String>,

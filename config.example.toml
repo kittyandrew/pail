@@ -396,6 +396,7 @@ slug = "tech-digest"
 #   "cron:0 8 * * *"        — 5-field cron expression (evaluated in UTC, not timezone)
 # Times for "at:" and "weekly:" are evaluated in the configured timezone.
 # Cron expressions always evaluate in UTC.
+# Omit schedule entirely for CLI-only channels (won't run in daemon mode).
 schedule = "at:08:00"
 # LLM model override for this channel (falls back to opencode.default_model)
 # model = "anthropic/claude-sonnet-4-5"
