@@ -183,20 +183,18 @@ Write `output.md` with YAML frontmatter followed by the article body:
   languages. If the article is in Ukrainian, write `## Проігноровано`, not `## Skipped`.
 - **Never silently ignore content.** If you skip something for any reason (too short,
   off-topic, couldn't fetch content, etc.), account for it in the `## Skipped` section.
-  **For RSS feeds:** list each skipped article individually as `- [Article Title](url) — reason`.
-  **For Telegram sources:** group skipped messages by source, one line per source with a count
-  and the dominant reason. Do NOT list every message individually — Telegram channels often
-  post dozens of small messages (air raid alerts, photos, reactions) and per-message listing
-  creates a skipped section longer than the article.
+  The format depends on the source type — check the YAML frontmatter `type` field in each
+  source file:
+  **RSS sources** (`type: rss`): list each skipped article individually. The title and URL
+  are in the heading of each content item (`### [Title](url)`). Copy that link directly:
+  `- [Article Title](url) — reason`. Every RSS item has a title and URL — use both.
+  WRONG: `- *Hacker News* — 3 messages (off-topic)` — this is Telegram format, not RSS.
+  RIGHT: `- [America's Pensions Can't Beat Vanguard](https://example.com/article) — financial, off-topic`.
+  **Telegram sources** (`type: telegram_channel`, `telegram_group`, `telegram_folder`): group
+  skipped messages by source, one line per source with a count and the dominant reason.
+  Do NOT list every message individually.
   Format: `- *Source Name* — N messages (reason)`.
-  If a source has messages skipped for different reasons, you may split into 2-3 lines:
-  `- *Source Name* — 14 messages (air raid alerts)` and `- *Source Name* — 2 messages (weather)`.
-  For sources where only 1-2 messages were skipped, a simple one-liner is fine:
-  `- *Source Name* — 1 message (no substance)`.
-  The source name comes from the source file's YAML frontmatter `name` field — use it for
-  every item, including private groups and channels (they all have names in the frontmatter).
-  WRONG: `- *приватний чат* — 5 messages (chat activity)` — "приватний чат" is not a name;
-  use the actual group name from the source frontmatter.
+  The source name comes from the source file's YAML frontmatter `name` field.
 
 ## Editor's Notes
 There are two types of editor's notes. Use both where appropriate.
