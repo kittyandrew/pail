@@ -54,7 +54,11 @@
           tag = "0.1.0";
           contents = [pail opencodePkg pkgs.cacert pkgs.tini passwd group];
           # fakeRootCommands runs under fakeroot so chown works in the Nix sandbox
-          fakeRootCommands = "mkdir -p tmp home/pail && chown ${uid}:${gid} home/pail";
+          fakeRootCommands = ''
+            mkdir -p tmp home/pail var/lib/pail home/pail/.local/share/opencode home/pail/.config/opencode
+            chmod 1777 tmp
+            chown -R ${uid}:${gid} home/pail var/lib/pail
+          '';
           config = {
             Entrypoint = ["${pkgs.tini}/bin/tini" "--" "${pail}/bin/pail" "--config" "/etc/pail/config.toml"];
             User = "${uid}:${gid}";
