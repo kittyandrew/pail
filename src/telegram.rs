@@ -439,7 +439,8 @@ pub fn build_subscription_map(
 }
 
 /// Mark Telegram channels/groups as read up to the latest message included in a generation.
-/// This is the ONLY write operation pail performs on Telegram (PRD §7.2, §10.7).
+/// This is the ONLY write operation pail performs on Telegram
+/// (see docs/specs/telegram.md "Read-Only Contract" and "Mark-as-Read").
 /// Best-effort: failures are logged but never fail the generation pipeline.
 pub async fn mark_channels_as_read(client: &Client, pool: &SqlitePool, items: &[ContentItem]) {
     // Group TG content items by chat_id and find the max message_id per chat

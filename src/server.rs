@@ -1,8 +1,11 @@
+use atom_syndication::{Category, Content, Entry, Feed, Link, Person, Text};
 use axum::Router;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
+use base64::Engine;
+use chrono::FixedOffset;
 use sqlx::SqlitePool;
 use subtle::ConstantTimeEq;
 use tracing::{debug, warn};
@@ -102,16 +105,13 @@ fn authenticate(feed_token: &str, query: &FeedQuery, headers: &HeaderMap) -> boo
     if let Some(auth_header) = headers.get(header::AUTHORIZATION)
         && let Ok(auth_str) = auth_header.to_str()
         && let Some(encoded) = auth_str.strip_prefix("Basic ")
+        && let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(encoded.trim())
+        && let Ok(credentials) = String::from_utf8(decoded)
+        && let Some((_user, password)) = credentials.split_once(':')
+        && constant_time_eq(password, feed_token)
     {
-        use base64::Engine;
-        if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(encoded.trim())
-            && let Ok(credentials) = String::from_utf8(decoded)
-            && let Some((_user, password)) = credentials.split_once(':')
-            && constant_time_eq(password, feed_token)
-        {
-            debug!("authenticated via HTTP Basic Auth");
-            return true;
-        }
+        debug!("authenticated via HTTP Basic Auth");
+        return true;
     }
 
     false
@@ -201,9 +201,6 @@ fn build_atom_feed(
     articles: &[crate::models::GeneratedArticleRow],
     base_url: &str,
 ) -> atom_syndication::Feed {
-    use atom_syndication::{Category, Content, Entry, Feed, Link, Person, Text};
-    use chrono::FixedOffset;
-
     let to_fixed = |dt: &chrono::DateTime<chrono::Utc>| -> chrono::DateTime<FixedOffset> {
         dt.with_timezone(&FixedOffset::east_opt(0).unwrap())
     };

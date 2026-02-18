@@ -4,15 +4,16 @@
 
 **pail** (Personal AI Lurker) — a self-hosted Rust service that monitors RSS feeds and Telegram channels, generates AI digest articles via opencode, and publishes them as Atom feeds.
 
-## Full Spec
+## Docs
 
-The complete PRD lives outside this repo (path varies by machine):
-```
-~/dev/kittyos/.notes/personal/pail/pail-prd.md
-~/dev/dotfiles/.notes/personal/pail/pail-prd.md
-```
+All specs and design docs live in `docs/` within this repo:
+- **`docs/core.md`** — architecture, data model, technical decisions
+- **`docs/specs/`** — implemented feature specs (RSS, Telegram, generation engine, Atom feed, daemon, CLI, config, Docker)
+- **`docs/ideas/`** — not-yet-implemented feature ideas and designs
 
-**Always load the PRD into context** at the start of a session, after context compaction, or when continuing from a previous session — before writing ANY implementation code. This is a hard requirement: read the full PRD first, then implement. If the PRD is not in context, stop and read it before proceeding.
+See `docs/README.md` for the full index with status.
+
+**Before writing implementation code**, load the relevant spec from `docs/specs/` and `docs/core.md` into context. For new features, check `docs/ideas/` for existing design notes.
 
 ## CI / Linting
 
@@ -40,7 +41,19 @@ nix develop   # enters shell with Rust toolchain, openssl, sqlite, opencode
 
 ## Spec Deviations
 
-When the implementation intentionally diverges from the PRD, **update the spec inline** in the relevant section with the rationale — don't append to a separate section. The spec should always reflect the actual implementation. Never leave undocumented differences between spec and code.
+When the implementation intentionally diverges from a spec, **update the spec inline** in the relevant `docs/specs/` file with the rationale — don't append to a separate section. The spec should always reflect the actual implementation. Never leave undocumented differences between spec and code.
+
+## Decision Log
+
+Every spec file (`docs/specs/`) and idea file (`docs/ideas/`) must have a `## Decisions` section at the bottom. Log **every** decision there — whether you made it yourself (even if obvious), or asked the user interactively. Always include the options that were considered, not just the outcome. Format:
+
+```markdown
+## Decisions
+
+- **<topic>:** <chosen option>.
+  Options: <option A> / <option B> / <option C>.
+  Rationale: <why this was chosen>.
+```
 
 ## Review Discipline
 
@@ -55,4 +68,4 @@ When reviewing code or auditing the project, **verify claims before reporting th
 - **Never stage or commit without explicit user confirmation.** After making changes, show the diff and wait for the user to approve before running `git add` or `git commit`.
 - **Never push to remote** unless the user explicitly asks in that moment. A one-time push approval does not carry forward to future pushes.
 - **Exception: `.claude/CLAUDE.md`** — always auto-stage this file after editing it.
-- **Never run git commands in the kittyos/dotfiles repo** (`~/dev/kittyos/` or `~/dev/dotfiles/`). You may edit files there (e.g., the PRD), but never stage, commit, or otherwise touch git in those repos.
+- **Never run git commands in the kittyos/dotfiles repo** (`~/dev/kittyos/` or `~/dev/dotfiles/`). You may edit files there, but never stage, commit, or otherwise touch git in those repos.

@@ -5,7 +5,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::{fetch, store};
 
-/// Global minimum poll interval to prevent abuse (PRD §11.1).
+/// Global minimum poll interval to prevent abuse (see docs/specs/rss-sources.md "Polling").
 const MIN_POLL_INTERVAL_SECS: i64 = 300; // 5 minutes
 
 /// RSS polling loop. Wakes every 60 seconds and fetches due sources.
@@ -46,7 +46,7 @@ pub async fn polling_loop(pool: SqlitePool, cancel: CancellationToken) {
             let poll_interval = match humantime::parse_duration(&source.poll_interval) {
                 Ok(d) => {
                     let dur = chrono::Duration::from_std(d).unwrap_or(chrono::Duration::minutes(30));
-                    // Enforce global minimum (PRD §11.1)
+                    // Enforce global minimum (see docs/specs/rss-sources.md "Polling")
                     if dur < min_interval { min_interval } else { dur }
                 }
                 Err(_) => chrono::Duration::minutes(30),

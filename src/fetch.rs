@@ -1,4 +1,5 @@
 use anyhow::Result;
+use base64::Engine;
 use chrono::{DateTime, Utc};
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderName, HeaderValue, IF_MODIFIED_SINCE, IF_NONE_MATCH, USER_AGENT};
 use sha2::{Digest, Sha256};
@@ -33,7 +34,6 @@ pub async fn fetch_rss_source(source: &Source) -> Result<FetchResult> {
         match auth_type.as_str() {
             "basic" => {
                 if let (Some(user), Some(pass)) = (&source.auth_username, &source.auth_password) {
-                    use base64::Engine;
                     let credentials = base64::engine::general_purpose::STANDARD.encode(format!("{user}:{pass}"));
                     headers.insert(
                         AUTHORIZATION,
@@ -174,7 +174,8 @@ pub async fn fetch_rss_source(source: &Source) -> Result<FetchResult> {
 
             let original_date: DateTime<Utc> = entry.published.or(entry.updated).unwrap_or(now);
 
-            // Dedup key: GUID if available, else SHA-256 of URL + title (PRD §11.2)
+            // Dedup key: GUID if available, else SHA-256 of URL + title
+            // (see docs/specs/rss-sources.md "Deduplication")
             let dedup_key = if !entry.id.is_empty() {
                 entry.id.clone()
             } else {

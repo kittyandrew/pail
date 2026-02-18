@@ -4,7 +4,7 @@
 //! statically bundles its own sqlite3 via `libsql-ffi`. pail uses `sqlx` with
 //! `libsqlite3-sys` (upstream sqlite3). Both produce the same symbols, causing duplicate
 //! symbol linker errors. This module reimplements the Session trait using sqlx to avoid
-//! the conflict entirely. See PRD §10.2 for full details.
+//! the conflict entirely. See docs/specs/telegram.md "Session Management" for full details.
 
 use std::collections::HashMap;
 use std::sync::Mutex;

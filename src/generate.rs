@@ -169,7 +169,7 @@ pub async fn generate_article(
         .model
         .as_deref()
         .or(config.opencode.default_model.as_deref())
-        .unwrap_or("opencode/big-pickle");
+        .unwrap_or("opencode/kimi-k2.5-free");
 
     // Invoke opencode
     let (generation_log, exit_code) = invoke_opencode(
@@ -499,7 +499,7 @@ async fn invoke_opencode(
     let child_stdout = child.stdout.take();
     let child_stderr = child.stderr.take();
 
-    // Wait for completion, timeout, or cancellation (PRD §9.9: kill subprocess on shutdown)
+    // Wait for completion, timeout, or cancellation (see docs/specs/daemon.md "Graceful Shutdown")
     tokio::select! {
         r = tokio::time::timeout(timeout, child.wait()) => {
             match r {

@@ -179,7 +179,7 @@ pub async fn scheduler_loop(
     // For new channels (last_generated = NULL), we wait for their next scheduled tick
     // instead of firing immediately. The first-seen time serves as the reference for
     // computing the next tick. On daemon restart this resets, which is correct —
-    // missed ticks are always skipped (PRD §9.2).
+    // missed ticks are always skipped (see docs/specs/daemon.md "Missed Ticks").
     let mut first_seen: HashMap<String, DateTime<Utc>> = HashMap::new();
 
     loop {

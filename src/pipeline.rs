@@ -156,7 +156,8 @@ pub async fn run_generation(
             sources = ?source_names,
             "no content items in time window, skipping generation"
         );
-        // Update last_generated so the next run doesn't re-check this empty window (PRD §9.7)
+        // Update last_generated so the next run doesn't re-check this empty window
+        // (see docs/specs/generation-engine.md "Empty Digest Handling")
         if !is_override {
             store::update_last_generated(pool, &channel.id, covers_to)
                 .await
@@ -240,7 +241,7 @@ pub async fn run_generation(
         .await
         .context("storing generated article")?;
 
-    // Mark TG channels as read if configured (PRD §10.7)
+    // Mark TG channels as read if configured (see docs/specs/telegram.md "Mark-as-Read")
     if channel_config.mark_tg_read.unwrap_or(false) {
         if let Some(client) = tg_client {
             telegram::mark_channels_as_read(client, pool, &items).await;

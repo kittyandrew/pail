@@ -41,7 +41,7 @@ pub fn message_to_content_item(
     // Get sender info (anonymous for channels, named for groups)
     let sender_name = msg.sender().and_then(|s| s.name().map(|n| n.to_string()));
 
-    // Construct t.me URL (PRD §10.5)
+    // Construct t.me URL (see docs/specs/telegram.md "Content Extraction")
     let url = match peer_username {
         Some(username) => Some(format!("https://t.me/{username}/{message_id}")),
         None => Some(format!("https://t.me/c/{chat_id}/{message_id}")),

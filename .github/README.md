@@ -7,7 +7,7 @@ A self-hosted service that monitors RSS feeds and Telegram channels/groups/folde
 ### Prerequisites
 
 - [Nix](https://nixos.org/download/) with flakes enabled
-- An LLM provider API key (or use the free `opencode/big-pickle` model)
+- An LLM provider API key (or use the free `opencode/kimi-k2.5-free` model)
 - For Telegram sources: API credentials from [my.telegram.org](https://my.telegram.org)
 
 ### Development
@@ -174,7 +174,7 @@ schedule = "cron:0 8 * * *"            # 5-field cron expression (always UTC)
 
 ## Known Issues
 
-**Generation fails with some Anthropic models (opencode bug).** When the context window fills up during generation, opencode triggers auto-compaction and then the model stops instead of continuing — exiting with code 0 and an empty `output.md`. This is a known opencode issue with non-interactive `run` mode ([#11301](https://github.com/anomalyco/opencode/issues/11301), [opencode-ai#336](https://github.com/opencode-ai/opencode/issues/336)). Models that use context efficiently (e.g., Opus) or have larger effective windows (e.g., free `opencode/big-pickle`) are not affected. Sonnet and Haiku are most likely to hit this with large source sets.
+**Generation fails with some Anthropic models (opencode bug).** When the context window fills up during generation, opencode triggers auto-compaction and then the model stops instead of continuing — exiting with code 0 and an empty `output.md`. This is a known opencode issue with non-interactive `run` mode ([#11301](https://github.com/anomalyco/opencode/issues/11301), [opencode-ai#336](https://github.com/opencode-ai/opencode/issues/336)). Models that use context efficiently (e.g., Opus) or have larger effective windows (e.g., free `opencode/kimi-k2.5-free`) are not affected. Sonnet and Haiku are most likely to hit this with large source sets.
 
 ## License
 
