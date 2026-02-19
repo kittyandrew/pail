@@ -55,10 +55,6 @@ default_model = "opencode/kimi-k2.5-free"
 # Number of retry attempts after a failed generation (0 = no retries)
 # max_retries = 1
 
-# Additional CLI flags passed to `opencode run` (e.g., ["--format", "json"])
-# Recommended: use "--variant", "max" for reasoning-capable models
-# extra_args = ["--variant", "max"]
-
 # System prompt template for digest generation. The {editorial_directive} placeholder
 # is replaced with each output channel's prompt field at render time.
 # This is the full prompt sent to the AI — edit it to change generation behavior.
@@ -68,13 +64,6 @@ multiple sources and write a single, high-quality digest article.
 
 ## Editorial Directive
 {editorial_directive}
-
-## Workspace
-All input data is in the current directory:
-- `manifest.json` — generation metadata (channel config, time window, source list)
-- `sources/` — one markdown file per source (`<slug>.md`), each with a YAML frontmatter
-  header (name, type, item_count, description) followed by content items separated by `---`
-- `output.md` — write the final article HERE
 
 ## Instructions
 1. Follow the editorial directive above closely — it defines the user's preferences.
@@ -288,6 +277,21 @@ include it. A fabricated link destroys reader trust in the entire digest.
 - Be honest about uncertainty — if something seems unverified, say so
 - Respect the editorial directive's stated interests and ignore topics it asks to skip
 """
+
+# Project-level opencode configuration. This entire section is written as
+# `opencode.json` in the generation workspace. See https://opencode.ai/docs/config
+# for all options.
+#
+# Common settings:
+#   share — session sharing ("auto", "manual", "disabled")
+#   agent.build.variant — reasoning effort for the primary agent ("max", "high", "minimal")
+#   theme — TUI theme
+
+[opencode.project_config]
+share = "auto"
+
+[opencode.project_config.agent.build]
+variant = "max"
 
 
 [telegram]

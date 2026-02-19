@@ -19,10 +19,130 @@ mod tg_session;
 
 use anyhow::{Context, Result};
 use clap::Parser;
+use sqlx::SqlitePool;
+use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use crate::cli::{Cli, Commands, TgCommands};
-use crate::config::{load_config, validate_config};
+use crate::config::{Config, OutputChannelConfig, load_config, validate_config};
+use crate::telegram::TgConnection;
+
+/// Shared CLI setup for commands that run a pipeline (Generate, Interactive).
+struct CliPipelineSetup<'a> {
+    pool: SqlitePool,
+    channel_config: &'a OutputChannelConfig,
+    time_window: Option<pipeline::TimeWindow>,
+    cancel: CancellationToken,
+    tg_conn: Option<TgConnection>,
+}
+
+/// Parse --since/--from/--to into a TimeWindow.
+fn parse_time_window(
+    since: &Option<String>,
+    from: &Option<String>,
+    to: &Option<String>,
+) -> Result<Option<pipeline::TimeWindow>> {
+    if let Some(since_str) = since {
+        let duration =
+            humantime::parse_duration(since_str).with_context(|| format!("invalid --since duration: '{since_str}'"))?;
+        Ok(Some(pipeline::TimeWindow::Since(duration)))
+    } else if let (Some(from_str), Some(to_str)) = (from, to) {
+        let from_dt = chrono::DateTime::parse_from_rfc3339(from_str)
+            .with_context(|| format!("invalid --from timestamp: '{from_str}' (expected RFC 3339)"))?
+            .to_utc();
+        let to_dt = chrono::DateTime::parse_from_rfc3339(to_str)
+            .with_context(|| format!("invalid --to timestamp: '{to_str}' (expected RFC 3339)"))?
+            .to_utc();
+        if from_dt >= to_dt {
+            anyhow::bail!("--from must be before --to");
+        }
+        Ok(Some(pipeline::TimeWindow::Explicit {
+            from: from_dt,
+            to: to_dt,
+        }))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Set up DB, config sync, channel lookup, cancellation, and TG connection.
+async fn setup_pipeline<'a>(
+    config: &'a Config,
+    slug: &str,
+    since: &Option<String>,
+    from: &Option<String>,
+    to: &Option<String>,
+) -> Result<CliPipelineSetup<'a>> {
+    let time_window = parse_time_window(since, from, to)?;
+
+    let pool = db::create_pool(config).await.context("creating database")?;
+    info!(db_path = %config.db_path().display(), "database ready");
+
+    store::sync_config_to_db(&pool, config)
+        .await
+        .context("syncing config to database")?;
+    info!("config synced to database");
+
+    let channel_config = config
+        .output_channel
+        .iter()
+        .find(|c| c.slug == slug)
+        .ok_or_else(|| anyhow::anyhow!("no output channel config for slug '{slug}'"))?;
+
+    let cancel = CancellationToken::new();
+    let cancel_signal = cancel.clone();
+    tokio::spawn(async move {
+        tokio::signal::ctrl_c().await.ok();
+        cancel_signal.cancel();
+    });
+
+    // Check if this channel has TG sources
+    let has_tg_sources = channel_config.sources.iter().any(|name| {
+        config
+            .source
+            .iter()
+            .any(|s| s.name == *name && s.source_type.starts_with("telegram_"))
+    });
+
+    let tg_conn = if has_tg_sources && config.telegram.enabled {
+        if config.telegram.api_id.is_none() || config.telegram.api_hash.is_none() {
+            anyhow::bail!("Telegram sources require [telegram].api_id and api_hash");
+        }
+        let conn = telegram::connect(config, &pool)
+            .await
+            .context("connecting to Telegram")?;
+
+        // Check auth
+        match conn.client.is_authorized().await {
+            Ok(true) => {}
+            Ok(false) => anyhow::bail!("Telegram not authorized. Run 'pail tg login' first."),
+            Err(e) => anyhow::bail!("Telegram auth check failed: {e}"),
+        }
+
+        // Resolve source IDs and folders (same as daemon::start_telegram)
+        let tg_sources = store::get_tg_sources(&pool).await?;
+        telegram::resolve_source_ids(&conn.client, &pool, &tg_sources).await?;
+        let folder_sources: Vec<_> = tg_sources
+            .iter()
+            .filter(|s| s.source_type == "telegram_folder")
+            .cloned()
+            .collect();
+        telegram::resolve_folders(&conn.client, &pool, &folder_sources).await?;
+        telegram::ensure_peer_cache(&conn.client, &pool, &tg_sources).await?;
+
+        Some(conn)
+    } else {
+        None
+    };
+
+    Ok(CliPipelineSetup {
+        pool,
+        channel_config,
+        time_window,
+        cancel,
+        tg_conn,
+    })
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -51,93 +171,19 @@ async fn main() -> Result<()> {
             from,
             to,
         }) => {
-            let time_window = if let Some(ref since_str) = since {
-                let duration = humantime::parse_duration(since_str)
-                    .with_context(|| format!("invalid --since duration: '{since_str}'"))?;
-                Some(pipeline::TimeWindow::Since(duration))
-            } else if let (Some(from_str), Some(to_str)) = (&from, &to) {
-                let from_dt = chrono::DateTime::parse_from_rfc3339(from_str)
-                    .with_context(|| format!("invalid --from timestamp: '{from_str}' (expected RFC 3339)"))?
-                    .to_utc();
-                let to_dt = chrono::DateTime::parse_from_rfc3339(to_str)
-                    .with_context(|| format!("invalid --to timestamp: '{to_str}' (expected RFC 3339)"))?
-                    .to_utc();
-                if from_dt >= to_dt {
-                    anyhow::bail!("--from must be before --to");
-                }
-                Some(pipeline::TimeWindow::Explicit {
-                    from: from_dt,
-                    to: to_dt,
-                })
-            } else {
-                None
-            };
+            let setup = setup_pipeline(&config, &slug, &since, &from, &to).await?;
+            let tg_client_ref = setup.tg_conn.as_ref().map(|c| &c.client);
 
-            let pool = db::create_pool(&config).await.context("creating database")?;
-            info!(db_path = %config.db_path().display(), "database ready");
-
-            store::sync_config_to_db(&pool, &config)
-                .await
-                .context("syncing config to database")?;
-            info!("config synced to database");
-
-            let channel_config = config
-                .output_channel
-                .iter()
-                .find(|c| c.slug == slug)
-                .ok_or_else(|| anyhow::anyhow!("no output channel config for slug '{slug}'"))?;
-
-            let cancel = tokio_util::sync::CancellationToken::new();
-            let cancel_signal = cancel.clone();
-            tokio::spawn(async move {
-                tokio::signal::ctrl_c().await.ok();
-                cancel_signal.cancel();
-            });
-
-            // Check if this channel has TG sources
-            let has_tg_sources = channel_config.sources.iter().any(|name| {
-                config
-                    .source
-                    .iter()
-                    .any(|s| s.name == *name && s.source_type.starts_with("telegram_"))
-            });
-
-            let tg_conn = if has_tg_sources && config.telegram.enabled {
-                if config.telegram.api_id.is_none() || config.telegram.api_hash.is_none() {
-                    anyhow::bail!("Telegram sources require [telegram].api_id and api_hash");
-                }
-                let conn = telegram::connect(&config, &pool)
-                    .await
-                    .context("connecting to Telegram")?;
-
-                // Check auth
-                match conn.client.is_authorized().await {
-                    Ok(true) => {}
-                    Ok(false) => anyhow::bail!("Telegram not authorized. Run 'pail tg login' first."),
-                    Err(e) => anyhow::bail!("Telegram auth check failed: {e}"),
-                }
-
-                // Resolve source IDs and folders (same as daemon::start_telegram)
-                let tg_sources = store::get_tg_sources(&pool).await?;
-                telegram::resolve_source_ids(&conn.client, &pool, &tg_sources).await?;
-                let folder_sources: Vec<_> = tg_sources
-                    .iter()
-                    .filter(|s| s.source_type == "telegram_folder")
-                    .cloned()
-                    .collect();
-                telegram::resolve_folders(&conn.client, &pool, &folder_sources).await?;
-                telegram::ensure_peer_cache(&conn.client, &pool, &tg_sources).await?;
-
-                Some(conn)
-            } else {
-                None
-            };
-
-            let tg_client_ref = tg_conn.as_ref().map(|c| &c.client);
-
-            let result =
-                pipeline::run_generation(&pool, &config, channel_config, time_window, true, tg_client_ref, cancel)
-                    .await?;
+            let result = pipeline::run_generation(
+                &setup.pool,
+                &config,
+                setup.channel_config,
+                setup.time_window,
+                true,
+                tg_client_ref,
+                setup.cancel,
+            )
+            .await?;
 
             match result {
                 Some(r) => {
@@ -156,7 +202,36 @@ async fn main() -> Result<()> {
             }
 
             // Cleanup TG connection
-            if let Some(conn) = tg_conn {
+            if let Some(conn) = setup.tg_conn {
+                conn.client.disconnect();
+                conn.runner_handle.abort();
+            }
+        }
+        Some(Commands::Interactive { slug, since, from, to }) => {
+            let setup = setup_pipeline(&config, &slug, &since, &from, &to).await?;
+            let tg_client_ref = setup.tg_conn.as_ref().map(|c| &c.client);
+
+            let result = pipeline::run_interactive(
+                &setup.pool,
+                &config,
+                setup.channel_config,
+                setup.time_window,
+                tg_client_ref,
+                setup.cancel,
+            )
+            .await?;
+
+            match result {
+                Some(count) => {
+                    println!("Interactive session ended ({count} content items in workspace).");
+                }
+                None => {
+                    println!("No content items found — nothing to explore.");
+                }
+            }
+
+            // Cleanup TG connection
+            if let Some(conn) = setup.tg_conn {
                 conn.client.disconnect();
                 conn.runner_handle.abort();
             }

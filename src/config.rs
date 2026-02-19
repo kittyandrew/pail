@@ -92,8 +92,9 @@ pub struct OpencodeConfig {
     pub timeout: String,
     #[serde(default = "default_max_retries")]
     pub max_retries: u32,
-    #[serde(default)]
-    pub extra_args: Vec<String>,
+    /// Free-form table written as `opencode.json` in the workspace.
+    #[serde(default = "default_project_config")]
+    pub project_config: serde_json::Value,
     #[serde(default)]
     pub system_prompt: String,
 }
@@ -105,7 +106,7 @@ impl Default for OpencodeConfig {
             default_model: None,
             timeout: default_timeout(),
             max_retries: default_max_retries(),
-            extra_args: Vec::new(),
+            project_config: serde_json::Value::Object(serde_json::Map::new()),
             system_prompt: String::new(),
         }
     }
@@ -119,6 +120,9 @@ pub struct TelegramConfig {
     pub api_hash: Option<String>,
 }
 
+fn default_project_config() -> serde_json::Value {
+    serde_json::Value::Object(serde_json::Map::new())
+}
 fn default_opencode_binary() -> String {
     "opencode".to_string()
 }

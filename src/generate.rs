@@ -31,6 +31,156 @@ struct SourceFileInfo {
     slug: String,
 }
 
+/// Returns the `## Workspace` section describing the workspace file layout.
+/// When `include_output_md` is true, includes the `output.md` bullet (for generation mode).
+/// When false, omits it (for interactive mode where there's no output file).
+pub fn workspace_context(include_output_md: bool) -> String {
+    let mut ctx = String::from(
+        "\n## Workspace\n\
+         All input data is in the current directory:\n\
+         - `manifest.json` — generation metadata (channel config, time window, source list)\n\
+         - `sources/` — one markdown file per source (`<slug>.md`), each with a YAML frontmatter\n\
+         \x20 header (name, type, item_count, description) followed by content items separated by `---`\n",
+    );
+    if include_output_md {
+        ctx.push_str("- `output.md` — write the final article HERE\n");
+    }
+    ctx
+}
+
+/// A prepared workspace directory with source data written and model resolved.
+pub struct PreparedWorkspace {
+    /// The temporary directory. Dropped when this struct is dropped (auto-cleanup).
+    pub dir: tempfile::TempDir,
+    /// Resolved model string (from channel config, global config, or default).
+    pub model: String,
+}
+
+impl PreparedWorkspace {
+    pub fn path(&self) -> &Path {
+        self.dir.path()
+    }
+}
+
+/// Prepare a workspace directory with manifest.json and sources/.
+/// Does NOT write prompt.md or output.md — those are mode-specific.
+#[allow(clippy::too_many_arguments)]
+pub async fn prepare_workspace(
+    config: &Config,
+    channel_config: &OutputChannelConfig,
+    items: &[ContentItem],
+    source_map: &HashMap<String, &Source>,
+    folder_channels: &HashMap<String, HashMap<i64, (String, Option<String>)>>,
+    covers_from: DateTime<Utc>,
+    covers_to: DateTime<Utc>,
+) -> Result<PreparedWorkspace> {
+    let workspace = tempfile::Builder::new()
+        .prefix("pail-gen-")
+        .tempdir()
+        .map_err(GenerationError::Workspace)?;
+
+    let ws_path = workspace.path();
+    info!(workspace = %ws_path.display(), "preparing workspace");
+
+    let keys: Vec<SourceKey> = items
+        .iter()
+        .map(|item| item_source_key(item, source_map))
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    let file_infos = build_source_file_infos(&keys, source_map, folder_channels);
+
+    write_manifest(
+        ws_path,
+        channel_config,
+        items,
+        source_map,
+        &file_infos,
+        covers_from,
+        covers_to,
+        &config.pail.timezone,
+    )
+    .await
+    .context("writing manifest")?;
+
+    write_source_content(ws_path, items, source_map, &file_infos)
+        .await
+        .context("writing source content")?;
+
+    write_opencode_config(ws_path, &config.opencode.project_config)
+        .await
+        .context("writing opencode.json")?;
+
+    let model = channel_config
+        .model
+        .as_deref()
+        .or(config.opencode.default_model.as_deref())
+        .unwrap_or("opencode/kimi-k2.5-free")
+        .to_string();
+
+    Ok(PreparedWorkspace { dir: workspace, model })
+}
+
+/// Write an `AGENTS.md` file to the workspace with workspace context (for interactive mode).
+pub async fn write_agents_md(ws_path: &Path) -> Result<()> {
+    let content = workspace_context(false);
+    tokio::fs::write(ws_path.join("AGENTS.md"), &content)
+        .await
+        .map_err(GenerationError::Workspace)?;
+    debug!("wrote AGENTS.md");
+    Ok(())
+}
+
+/// Write an `opencode.json` project config from `[opencode.project_config]`.
+/// The config value is written as-is — defaults (share, variant) come from config.toml.
+pub async fn write_opencode_config(ws_path: &Path, project_config: &serde_json::Value) -> Result<()> {
+    let content = serde_json::to_string_pretty(project_config).context("serializing opencode config")?;
+    tokio::fs::write(ws_path.join("opencode.json"), content)
+        .await
+        .map_err(GenerationError::Workspace)?;
+    debug!("wrote opencode.json");
+    Ok(())
+}
+
+/// Launch opencode in TUI mode (interactive, inherited stdio).
+/// Returns the process exit code. No timeout, no cancellation — the user controls the session.
+pub async fn invoke_opencode_tui(binary: &str, workspace: &Path, model: &str) -> Result<Option<i32>> {
+    info!(
+        binary = %binary,
+        model = %model,
+        workspace = %workspace.display(),
+        "launching opencode TUI"
+    );
+
+    // TUI mode: `opencode <project> --model <model>`
+    let mut cmd = tokio::process::Command::new(binary);
+    cmd.arg(workspace)
+        .arg("--model")
+        .arg(model)
+        .current_dir(workspace) // opencode uses the positional arg, but CWD may matter for subprocesses
+        .env("OPENCODE_ENABLE_EXA", "1")
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit());
+
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(GenerationError::OpencodeBinaryNotFound(binary.to_string()).into());
+        }
+        Err(e) => {
+            return Err(GenerationError::OpencodeExecution {
+                exit_code: None,
+                stderr: e.to_string(),
+            }
+            .into());
+        }
+    };
+
+    let status = child.wait().await.context("waiting for opencode TUI")?;
+    Ok(status.code())
+}
+
 /// Classify a content item into its SourceKey, splitting folder items by chat_id.
 fn item_source_key(item: &ContentItem, source_map: &HashMap<String, &Source>) -> SourceKey {
     let source = source_map.get(&item.source_id);
@@ -119,66 +269,36 @@ pub async fn generate_article(
     covers_to: DateTime<Utc>,
     cancel: CancellationToken,
 ) -> Result<(GeneratedArticle, String)> {
-    // Create workspace
-    let workspace = tempfile::Builder::new()
-        .prefix("pail-gen-")
-        .tempdir()
-        .map_err(GenerationError::Workspace)?;
-
-    let ws_path = workspace.path();
-    info!(workspace = %ws_path.display(), "preparing generation workspace");
-
-    // Build source keys and file info for workspace generation
-    let keys: Vec<SourceKey> = items
-        .iter()
-        .map(|item| item_source_key(item, source_map))
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect();
-    let file_infos = build_source_file_infos(&keys, source_map, folder_channels);
-
-    // Write workspace files
-    write_manifest(
-        ws_path,
+    let ws = prepare_workspace(
+        config,
         channel_config,
         items,
         source_map,
-        &file_infos,
+        folder_channels,
         covers_from,
         covers_to,
-        &config.pail.timezone,
     )
     .await
-    .context("writing manifest")?;
+    .context("preparing workspace")?;
+
+    let ws_path = ws.path();
 
     let prompt = write_prompt(ws_path, config, channel_config)
         .await
         .context("writing prompt")?;
-
-    write_source_content(ws_path, items, source_map, &file_infos)
-        .await
-        .context("writing source content")?;
 
     // Create empty output.md
     tokio::fs::write(ws_path.join("output.md"), "")
         .await
         .map_err(GenerationError::Workspace)?;
 
-    // Determine model
-    let model = channel_config
-        .model
-        .as_deref()
-        .or(config.opencode.default_model.as_deref())
-        .unwrap_or("opencode/kimi-k2.5-free");
-
     // Invoke opencode
     let (generation_log, exit_code) = invoke_opencode(
         &config.opencode.binary,
         ws_path,
-        model,
+        &ws.model,
         &prompt,
         &config.opencode.timeout,
-        &config.opencode.extra_args,
         cancel,
     )
     .await
@@ -236,11 +356,11 @@ pub async fn generate_article(
         body_markdown,
         content_item_ids,
         generation_log,
-        model_used: model.to_string(),
+        model_used: ws.model.clone(),
         token_count: None,
     };
 
-    // Workspace is cleaned up when `workspace` is dropped
+    // Workspace is cleaned up when `ws` is dropped
     Ok((article, output_content))
 }
 
@@ -303,10 +423,13 @@ async fn write_manifest(
 }
 
 async fn write_prompt(ws_path: &Path, config: &Config, channel_config: &OutputChannelConfig) -> Result<String> {
-    let prompt = config
+    let rendered = config
         .opencode
         .system_prompt
         .replace("{editorial_directive}", channel_config.prompt.trim());
+
+    // Prepend the workspace context (with output.md bullet) so it's defined in code once
+    let prompt = format!("{}{}", workspace_context(true), rendered);
 
     // Write to workspace for debugging/inspection only
     tokio::fs::write(ws_path.join("prompt.md"), &prompt)
@@ -454,7 +577,6 @@ async fn invoke_opencode(
     model: &str,
     prompt: &str,
     timeout_str: &str,
-    extra_args: &[String],
     cancel: CancellationToken,
 ) -> Result<(String, Option<i32>)> {
     let timeout = humantime::parse_duration(timeout_str).context("parsing opencode timeout")?;
@@ -468,10 +590,8 @@ async fn invoke_opencode(
 
     let mut cmd = tokio::process::Command::new(binary);
     cmd.arg("run")
-        .arg("--share")
         .arg("--model")
         .arg(model)
-        .args(extra_args)
         .arg("--")
         .arg(prompt)
         .current_dir(workspace)

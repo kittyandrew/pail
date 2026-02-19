@@ -242,7 +242,7 @@ generated_article {
 |---|---|---|
 | Language | Rust | Performance, safety, testability, single static binary |
 | Telegram lib | [grammers](https://codeberg.org/Lonami/grammers) (Codeberg) | By Lonami (Telethon author), Rust-native MTProto. Pre-1.0, actively developed (last commit Feb 2026). |
-| LLM integration | Shell out to [opencode](https://github.com/anomalyco/opencode) | Gets all model support, MCP, tools, agentic for free. Non-interactive via `opencode run`. |
+| LLM integration | Shell out to [opencode](https://github.com/anomalyco/opencode) | Gets all model support, MCP, tools, agentic for free. Batch generation via `opencode run`; interactive exploration via `opencode` TUI (see [interactive mode](specs/interactive-mode.md)). |
 | Config | TOML + DB | TOML for declarative/NixOS; DB for web UI and runtime state |
 | DB | SQLite (default) | On-disk file in data_dir, docker volume. WAL mode for concurrent reads. PostgreSQL as optional backend later. |
 | DB IDs | UUID v4 | All primary keys use UUID4, not auto-increment integers. |

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -25,21 +26,27 @@ pub struct PipelineResult {
     pub raw_output: String,
 }
 
-/// Run the full generation pipeline for a single output channel.
-///
-/// If `fetch_content` is true, fetches RSS feeds and TG history before generation (CLI mode).
-/// If false, assumes the poller/listener has already fetched content (daemon mode).
-///
-/// Returns `None` if no content items were found (generation skipped).
-pub async fn run_generation(
+/// Shared pipeline context: everything needed after content fetching and item querying.
+struct PipelineContext {
+    channel: models::OutputChannel,
+    items: Vec<models::ContentItem>,
+    source_map: HashMap<String, models::Source>,
+    folder_channels: HashMap<String, HashMap<i64, (String, Option<String>)>>,
+    covers_from: DateTime<Utc>,
+    covers_to: DateTime<Utc>,
+    is_override: bool,
+}
+
+/// Shared setup: channel/source lookup, time window, content fetching, item querying.
+/// Returns None if no content items were found or if cancelled.
+async fn prepare_pipeline_context(
     pool: &SqlitePool,
-    config: &Config,
     channel_config: &OutputChannelConfig,
     time_window: Option<TimeWindow>,
     fetch_content: bool,
     tg_client: Option<&Client>,
-    cancel: CancellationToken,
-) -> Result<Option<PipelineResult>> {
+    cancel: &CancellationToken,
+) -> Result<Option<PipelineContext>> {
     let channel = store::get_channel_by_slug(pool, &channel_config.slug)
         .await
         .context("looking up output channel")?
@@ -136,7 +143,7 @@ pub async fn run_generation(
                 .collect();
             if !tg_sources.is_empty() {
                 info!(count = tg_sources.len(), "fetching TG source history");
-                fetch_tg::fetch_tg_sources(client, pool, &tg_sources, covers_from, &cancel)
+                fetch_tg::fetch_tg_sources(client, pool, &tg_sources, covers_from, cancel)
                     .await
                     .context("fetching TG sources")?;
             }
@@ -154,7 +161,7 @@ pub async fn run_generation(
             from = %covers_from.to_rfc3339(),
             to = %covers_to.to_rfc3339(),
             sources = ?source_names,
-            "no content items in time window, skipping generation"
+            "no content items in time window"
         );
         // Update last_generated so the next run doesn't re-check this empty window
         // (see docs/specs/generation-engine.md "Empty Digest Handling")
@@ -166,16 +173,12 @@ pub async fn run_generation(
         return Ok(None);
     }
 
-    info!(items = items.len(), "content items collected for generation");
+    info!(items = items.len(), "content items collected");
 
-    let source_map: std::collections::HashMap<String, &models::Source> =
-        sources.iter().map(|s| (s.id.clone(), s)).collect();
+    let source_map: HashMap<String, models::Source> = sources.iter().map(|s| (s.id.clone(), s.clone())).collect();
 
     // Gather folder channel maps for per-channel workspace splitting
-    let mut folder_channels: std::collections::HashMap<
-        String,
-        std::collections::HashMap<i64, (String, Option<String>)>,
-    > = std::collections::HashMap::new();
+    let mut folder_channels: HashMap<String, HashMap<i64, (String, Option<String>)>> = HashMap::new();
     for source in &sources {
         if source.source_type == "telegram_folder" {
             let channels = store::get_folder_channel_map(pool, &source.id)
@@ -185,9 +188,44 @@ pub async fn run_generation(
         }
     }
 
+    Ok(Some(PipelineContext {
+        channel,
+        items,
+        source_map,
+        folder_channels,
+        covers_from,
+        covers_to,
+        is_override,
+    }))
+}
+
+/// Run the full generation pipeline for a single output channel.
+///
+/// If `fetch_content` is true, fetches RSS feeds and TG history before generation (CLI mode).
+/// If false, assumes the poller/listener has already fetched content (daemon mode).
+///
+/// Returns `None` if no content items were found (generation skipped).
+pub async fn run_generation(
+    pool: &SqlitePool,
+    config: &Config,
+    channel_config: &OutputChannelConfig,
+    time_window: Option<TimeWindow>,
+    fetch_content: bool,
+    tg_client: Option<&Client>,
+    cancel: CancellationToken,
+) -> Result<Option<PipelineResult>> {
+    let ctx =
+        match prepare_pipeline_context(pool, channel_config, time_window, fetch_content, tg_client, &cancel).await? {
+            Some(ctx) => ctx,
+            None => return Ok(None),
+        };
+
     if cancel.is_cancelled() {
         return Ok(None);
     }
+
+    // Build reference maps for generate_article (it expects &Source references)
+    let source_ref_map: HashMap<String, &models::Source> = ctx.source_map.iter().map(|(k, v)| (k.clone(), v)).collect();
 
     // Generate with retry
     let max_retries = config.opencode.max_retries;
@@ -210,12 +248,12 @@ pub async fn run_generation(
         match generate::generate_article(
             config,
             channel_config,
-            &channel,
-            &items,
-            &source_map,
-            &folder_channels,
-            covers_from,
-            covers_to,
+            &ctx.channel,
+            &ctx.items,
+            &source_ref_map,
+            &ctx.folder_channels,
+            ctx.covers_from,
+            ctx.covers_to,
             cancel.clone(),
         )
         .await
@@ -244,15 +282,15 @@ pub async fn run_generation(
     // Mark TG channels as read if configured (see docs/specs/telegram.md "Mark-as-Read")
     if channel_config.mark_tg_read.unwrap_or(false) {
         if let Some(client) = tg_client {
-            telegram::mark_channels_as_read(client, pool, &items).await;
+            telegram::mark_channels_as_read(client, pool, &ctx.items).await;
         } else {
-            warn!(channel = %channel.name, "mark_tg_read is enabled but no Telegram client available");
+            warn!(channel = %ctx.channel.name, "mark_tg_read is enabled but no Telegram client available");
         }
     }
 
     // Update last_generated (skip for --since/--from/--to overrides)
-    if !is_override {
-        store::update_last_generated(pool, &channel.id, covers_to)
+    if !ctx.is_override {
+        store::update_last_generated(pool, &ctx.channel.id, ctx.covers_to)
             .await
             .context("updating last_generated")?;
     }
@@ -260,4 +298,56 @@ pub async fn run_generation(
     info!(title = %article.title, "article generated successfully");
 
     Ok(Some(PipelineResult { article, raw_output }))
+}
+
+/// Run an interactive opencode TUI session with collected source data.
+///
+/// Same pipeline as `run_generation` up to workspace preparation, but instead of
+/// `opencode run` (batch), launches `opencode` (TUI) for ad-hoc exploration.
+/// No article is parsed or stored. No `last_generated` update.
+///
+/// Returns the number of content items in the workspace, or None if no items found.
+pub async fn run_interactive(
+    pool: &SqlitePool,
+    config: &Config,
+    channel_config: &OutputChannelConfig,
+    time_window: Option<TimeWindow>,
+    tg_client: Option<&Client>,
+    cancel: CancellationToken,
+) -> Result<Option<usize>> {
+    let ctx = match prepare_pipeline_context(pool, channel_config, time_window, true, tg_client, &cancel).await? {
+        Some(ctx) => ctx,
+        None => return Ok(None),
+    };
+
+    let item_count = ctx.items.len();
+
+    // Build reference maps for prepare_workspace
+    let source_ref_map: HashMap<String, &models::Source> = ctx.source_map.iter().map(|(k, v)| (k.clone(), v)).collect();
+
+    let ws = generate::prepare_workspace(
+        config,
+        channel_config,
+        &ctx.items,
+        &source_ref_map,
+        &ctx.folder_channels,
+        ctx.covers_from,
+        ctx.covers_to,
+    )
+    .await
+    .context("preparing interactive workspace")?;
+
+    generate::write_agents_md(ws.path())
+        .await
+        .context("writing AGENTS.md")?;
+
+    let exit_code = generate::invoke_opencode_tui(&config.opencode.binary, ws.path(), &ws.model)
+        .await
+        .context("running opencode TUI")?;
+
+    if exit_code != Some(0) {
+        warn!(exit_code = ?exit_code, "opencode TUI exited with non-zero code");
+    }
+
+    Ok(Some(item_count))
 }

@@ -15,6 +15,8 @@ See `docs/README.md` for the full index with status.
 
 **Before writing implementation code**, load the relevant spec from `docs/specs/` and `docs/core.md` into context. For new features, check `docs/ideas/` for existing design notes.
 
+**When an idea is fully implemented**, move it from `docs/ideas/` to `docs/specs/`, remove the `**Status: implemented**` line (everything in `specs/` is implemented by definition), update `docs/README.md` (add to Specs table, remove from Ideas table), and fix any cross-references (e.g., `core.md` links).
+
 ## CI / Linting
 
 All checks run in GitHub Actions CI (`.github/workflows/ci.yml`) on push to `main` and on PRs. Run locally via `nix develop`:
