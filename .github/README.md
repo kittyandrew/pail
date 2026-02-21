@@ -57,7 +57,10 @@ The session is stored in the database and persists across restarts.
 
 ```bash
 # Validate config
-pail validate
+pail config validate
+
+# Interactively manage Telegram sources (requires pail tg login first)
+pail config edit
 
 # Generate a digest (one-shot, fetches RSS + TG history, invokes opencode)
 pail generate tech-digest --output ./digest.md

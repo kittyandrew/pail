@@ -13,7 +13,7 @@ use crate::models::{ContentItem, GeneratedArticle, GeneratedArticleRow, OutputCh
 const SOURCE_COLUMNS: &str = "id, source_type, name, enabled, url, poll_interval, max_items,
     auth_type, auth_username, auth_password, auth_token, auth_header_name, auth_header_value,
     last_fetched_at, last_etag, last_modified_header,
-    tg_id, tg_username, tg_folder_id, tg_folder_name, tg_exclude, description";
+    tg_id, tg_username, tg_folder_id, tg_folder_name, description";
 
 /// Upsert a source by name — insert or update if it already exists.
 pub async fn upsert_source(pool: &SqlitePool, source: &crate::config::SourceConfig) -> Result<String> {
@@ -32,10 +32,6 @@ pub async fn upsert_source(pool: &SqlitePool, source: &crate::config::SourceConf
         };
 
     let enabled = source.enabled.unwrap_or(true);
-    let tg_exclude = source
-        .exclude
-        .as_ref()
-        .map(|v| serde_json::to_string(v).unwrap_or_default());
 
     // Check if source exists by name
     let existing: Option<(String,)> = sqlx::query_as("SELECT id FROM sources WHERE name = ?")
@@ -48,7 +44,7 @@ pub async fn upsert_source(pool: &SqlitePool, source: &crate::config::SourceConf
         sqlx::query(
             "UPDATE sources SET source_type = ?, enabled = ?, url = ?, poll_interval = ?, max_items = ?,
              auth_type = ?, auth_username = ?, auth_password = ?, auth_token = ?, auth_header_name = ?, auth_header_value = ?,
-             tg_id = COALESCE(?, tg_id), tg_username = ?, tg_folder_name = ?, tg_exclude = ?, description = ?,
+             tg_id = COALESCE(?, tg_id), tg_username = ?, tg_folder_name = ?, description = ?,
              updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
              WHERE id = ?",
         )
@@ -66,7 +62,6 @@ pub async fn upsert_source(pool: &SqlitePool, source: &crate::config::SourceConf
         .bind(source.tg_id)
         .bind(&source.tg_username)
         .bind(&source.tg_folder_name)
-        .bind(&tg_exclude)
         .bind(&source.description)
         .bind(&existing_id)
         .execute(pool)
@@ -80,8 +75,8 @@ pub async fn upsert_source(pool: &SqlitePool, source: &crate::config::SourceConf
         sqlx::query(
             "INSERT INTO sources (id, source_type, name, enabled, url, poll_interval, max_items,
              auth_type, auth_username, auth_password, auth_token, auth_header_name, auth_header_value,
-             tg_id, tg_username, tg_folder_name, tg_exclude, description)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             tg_id, tg_username, tg_folder_name, description)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&id)
         .bind(&source.source_type)
@@ -99,7 +94,6 @@ pub async fn upsert_source(pool: &SqlitePool, source: &crate::config::SourceConf
         .bind(source.tg_id)
         .bind(&source.tg_username)
         .bind(&source.tg_folder_name)
-        .bind(&tg_exclude)
         .bind(&source.description)
         .execute(pool)
         .await

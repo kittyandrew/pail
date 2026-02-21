@@ -148,8 +148,6 @@ pub struct SourceConfig {
     pub tg_id: Option<i64>,
     pub tg_username: Option<String>,
     pub tg_folder_name: Option<String>,
-    #[serde(default)]
-    pub exclude: Option<Vec<String>>,
     #[serde(default = "default_enabled")]
     pub enabled: Option<bool>,
     pub description: Option<String>,

@@ -15,8 +15,11 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Validate the configuration file
-    Validate,
+    /// Config file management (validate, edit sources)
+    Config {
+        #[command(subcommand)]
+        command: ConfigCommands,
+    },
 
     /// Generate a digest article for an output channel
     Generate {
@@ -63,6 +66,14 @@ pub enum Commands {
         #[command(subcommand)]
         command: TgCommands,
     },
+}
+
+#[derive(Subcommand)]
+pub enum ConfigCommands {
+    /// Validate the configuration file
+    Validate,
+    /// Interactive TUI for managing Telegram sources
+    Edit,
 }
 
 #[derive(Subcommand)]

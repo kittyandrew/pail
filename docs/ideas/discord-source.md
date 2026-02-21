@@ -18,7 +18,7 @@ The entire feature depends on whether a userbot approach (user token, not bot to
 - Text channels, forum channels, and threads
 - Source types: `discord_server` (all text channels in a server), `discord_channel` (specific channel)
 - Per-channel exclusion similar to TG folders
-- CLI config editor integration (browse servers/channels, auto-generate source entries) — reuse the TUI pattern from the [CLI Config Editor](cli-config-editor.md)
+- CLI config editor integration (browse servers/channels, auto-generate source entries) — reuse the TUI pattern from the [CLI Config Editor](../specs/cli-config-editor.md)
 
 ## Architecture (sketch)
 

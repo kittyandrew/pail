@@ -1,12 +1,22 @@
 # CLI Commands
 
-## validate
+## config validate
 
 ```bash
-pail validate
+pail config validate
 ```
 
 Parse and validate config, report errors, exit. No DB side effects — does not create or touch the database.
+
+## config edit
+
+```bash
+pail config edit
+```
+
+Interactive TUI for managing Telegram sources. See [CLI Config Editor spec](cli-config-editor.md) for full details.
+
+Requires a Telegram connection (`pail tg login` first). All operations involve browsing live TG dialogs/folders.
 
 ## generate
 

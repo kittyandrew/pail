@@ -75,6 +75,12 @@ rand = "0.9"
 # Temp directories
 tempfile = "3"
 
+# Interactive prompts (TUI)
+inquire = "0.9"
+
+# Document-preserving TOML editing
+toml_edit = "0.22"
+
 # Secure password input (no terminal echo)
 rpassword = "5"
 

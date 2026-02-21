@@ -24,7 +24,6 @@ pub struct Source {
     pub tg_username: Option<String>,
     pub tg_folder_id: Option<i32>,
     pub tg_folder_name: Option<String>,
-    pub tg_exclude: Option<String>, // JSON array
     pub description: Option<String>,
 }
 

@@ -377,7 +377,6 @@ url = "https://lobste.rs/rss"
 # name = "News Folder"
 # type = "telegram_folder"
 # tg_folder_name = "News"
-# exclude = ["@some_noisy_channel"]
 
 
 # ┌─────────────────────────────────────────────────────────────────────┐

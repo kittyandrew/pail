@@ -161,7 +161,6 @@ source {
     tg_username: Option<String> # @username if available
     tg_folder_id: Option<i32>  # Telegram folder ID (resolved at runtime from tg_folder_name, stored in DB)
     tg_folder_name: Option<String> # folder name (used in config, resolved to ID via getDialogFilters)
-    exclude: Option<Vec<String>> # TG @usernames to exclude from a folder source
     description: Option<String>  # user-provided context about the source (language, focus area, reliability)
 }
 

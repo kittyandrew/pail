@@ -3,6 +3,7 @@ use std::io::Write;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use grammers_client::peer::Peer as ClientPeer;
 use grammers_client::{Client, SenderPool, SignInError};
 use grammers_mtsender::ConnectionParams;
 use grammers_session::types::PeerId;
@@ -293,16 +294,6 @@ pub async fn resolve_folders(client: &Client, pool: &SqlitePool, folder_sources:
             .await
             .with_context(|| format!("storing folder_id for source '{}'", source.name))?;
 
-        // Parse exclude list
-        let exclude_usernames: Vec<String> = source
-            .tg_exclude
-            .as_ref()
-            .and_then(|json| serde_json::from_str::<Vec<String>>(json).ok())
-            .unwrap_or_default()
-            .into_iter()
-            .map(|u| u.trim_start_matches('@').to_lowercase())
-            .collect();
-
         // Clear existing folder channels and re-sync
         store::delete_folder_channels(pool, &source.id).await?;
 
@@ -324,14 +315,6 @@ pub async fn resolve_folders(client: &Client, pool: &SqlitePool, folder_sources:
             };
 
             let (name, username) = channel_info.get(&tg_id).cloned().unwrap_or((None, None));
-
-            // Check exclude list
-            if let Some(ref uname) = username
-                && exclude_usernames.contains(&uname.to_lowercase())
-            {
-                debug!(source = %source.name, channel = %uname, "excluding channel from folder");
-                continue;
-            }
 
             store::upsert_folder_channel(pool, &source.id, tg_id, name.as_deref(), username.as_deref()).await?;
         }
@@ -499,6 +482,317 @@ pub async fn mark_channels_as_read(client: &Client, pool: &SqlitePool, items: &[
             }
         }
     }
+}
+
+// ─── Types and functions for the config editor TUI ───
+
+/// Chat type classification for TUI display.
+/// Note: grammers maps both basic groups and supergroups to `Peer::Group`,
+/// so we only distinguish Channel (broadcast) vs Group (everything else).
+#[derive(Clone)]
+pub enum TgChatType {
+    Channel,
+    Group,
+}
+
+impl TgChatType {
+    /// The config file `type` value for this chat type.
+    pub fn config_type(&self) -> &'static str {
+        match self {
+            TgChatType::Channel => "telegram_channel",
+            TgChatType::Group => "telegram_group",
+        }
+    }
+}
+
+impl std::fmt::Display for TgChatType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TgChatType::Channel => write!(f, "Channel"),
+            TgChatType::Group => write!(f, "Group"),
+        }
+    }
+}
+
+/// A Telegram dialog (channel/group) for TUI selection.
+#[derive(Clone)]
+pub struct TgDialog {
+    pub name: String,
+    pub chat_type: TgChatType,
+    pub username: Option<String>,
+    pub tg_id: i64,
+}
+
+/// A Telegram folder with its resolved channel list.
+pub struct TgFolder {
+    pub name: String,
+    pub channels: Vec<TgDialog>,
+}
+
+/// List all non-DM dialogs from the user's Telegram account.
+pub async fn list_dialogs(client: &Client) -> Result<Vec<TgDialog>> {
+    let mut result = Vec::new();
+    let mut dialogs = client.iter_dialogs();
+
+    while let Some(dialog) = dialogs.next().await.context("iterating dialogs")? {
+        let peer = dialog.peer();
+
+        let (chat_type, tg_id) = match peer {
+            ClientPeer::User(_) => continue, // Skip DMs/bots/self
+            ClientPeer::Channel(_) => (TgChatType::Channel, peer.id().bare_id()),
+            ClientPeer::Group(_) => (TgChatType::Group, peer.id().bare_id()),
+        };
+
+        result.push(TgDialog {
+            name: peer.name().unwrap_or("(unnamed)").to_string(),
+            chat_type,
+            username: peer.username().map(|s| s.to_string()),
+            tg_id,
+        });
+    }
+
+    Ok(result)
+}
+
+/// List all Telegram folders with their resolved channel contents.
+pub async fn list_folders(client: &Client) -> Result<Vec<TgFolder>> {
+    let request = tl::functions::messages::GetDialogFilters {};
+    let result = client.invoke(&request).await.context("fetching dialog filters")?;
+
+    let filters = match result {
+        tl::enums::messages::DialogFilters::Filters(f) => f.filters,
+    };
+
+    let mut folders = Vec::new();
+
+    for filter in &filters {
+        let (title, pinned_peers, included_peers) = match filter {
+            tl::enums::DialogFilter::Filter(df) => {
+                let title = extract_filter_title(&df.title);
+                (title, &df.pinned_peers, &df.include_peers)
+            }
+            tl::enums::DialogFilter::Chatlist(df) => {
+                let title = extract_filter_title(&df.title);
+                (title, &df.pinned_peers, &df.include_peers)
+            }
+            _ => continue,
+        };
+
+        let title = match title {
+            Some(t) => t,
+            None => continue,
+        };
+
+        let all_peers: Vec<&tl::enums::InputPeer> = pinned_peers.iter().chain(included_peers.iter()).collect();
+        let channel_info = batch_resolve_channels(client, &all_peers).await;
+
+        let mut channels = Vec::new();
+        for peer in &all_peers {
+            let tg_id = match peer {
+                tl::enums::InputPeer::Channel(c) => c.channel_id,
+                tl::enums::InputPeer::Chat(c) => c.chat_id,
+                tl::enums::InputPeer::User(_) => continue, // skip DMs in folders
+                _ => continue,
+            };
+
+            let (name, username) = channel_info.get(&tg_id).cloned().unwrap_or((None, None));
+
+            // Determine chat type from peer kind
+            let chat_type = match peer {
+                tl::enums::InputPeer::Channel(_) => {
+                    // We can't easily distinguish channel vs supergroup from InputPeer alone,
+                    // but the batch_resolve_channels gave us Chat::Channel which has the flag.
+                    // Default to Channel — the config uses telegram_folder anyway.
+                    TgChatType::Channel
+                }
+                tl::enums::InputPeer::Chat(_) => TgChatType::Group,
+                _ => continue,
+            };
+
+            channels.push(TgDialog {
+                name: name.unwrap_or_else(|| format!("Unknown ({})", tg_id)),
+                chat_type,
+                username,
+                tg_id,
+            });
+        }
+
+        folders.push(TgFolder { name: title, channels });
+    }
+
+    // Synthesize an "Archived" folder from archived dialogs (folder_id=1)
+    let archived = fetch_archived_folder(client).await;
+    if let Ok(folder) = archived
+        && !folder.channels.is_empty()
+    {
+        folders.push(folder);
+    }
+
+    Ok(folders)
+}
+
+/// Fetch archived dialogs (folder_id=1) and return them as a synthetic "Archived" TgFolder.
+async fn fetch_archived_folder(client: &Client) -> Result<TgFolder> {
+    let mut channels = Vec::new();
+    // Paginate through archived dialogs
+    let mut offset_date = 0;
+    let mut offset_id = 0;
+    let mut offset_peer = tl::enums::InputPeer::Empty;
+    let mut exclude_pinned = false;
+
+    loop {
+        let request = tl::functions::messages::GetDialogs {
+            exclude_pinned,
+            folder_id: Some(1),
+            offset_date,
+            offset_id,
+            offset_peer: offset_peer.clone(),
+            limit: 100,
+            hash: 0,
+        };
+
+        let (dialogs, messages, users, chats) = match client.invoke(&request).await? {
+            tl::enums::messages::Dialogs::Dialogs(d) => (d.dialogs, d.messages, d.users, d.chats),
+            tl::enums::messages::Dialogs::Slice(d) => (d.dialogs, d.messages, d.users, d.chats),
+            tl::enums::messages::Dialogs::NotModified(_) => break,
+        };
+
+        // Build a map of chat_id -> (name, username) from the chats array
+        let mut chat_map: HashMap<i64, (String, Option<String>)> = HashMap::new();
+        for chat in &chats {
+            match chat {
+                tl::enums::Chat::Channel(c) => {
+                    chat_map.insert(c.id, (c.title.clone(), c.username.clone()));
+                }
+                tl::enums::Chat::Chat(c) => {
+                    chat_map.insert(c.id, (c.title.clone(), None));
+                }
+                _ => {}
+            }
+        }
+
+        let is_final = dialogs.len() < 100;
+
+        for dialog_enum in &dialogs {
+            let peer = match dialog_enum {
+                tl::enums::Dialog::Dialog(d) => &d.peer,
+                _ => continue,
+            };
+
+            let (chat_type, tg_id) = match peer {
+                tl::enums::Peer::User(_) => continue,
+                tl::enums::Peer::Channel(c) => (TgChatType::Channel, c.channel_id),
+                tl::enums::Peer::Chat(c) => (TgChatType::Group, c.chat_id),
+            };
+
+            let (name, username) = chat_map
+                .get(&tg_id)
+                .cloned()
+                .unwrap_or_else(|| (format!("Unknown ({tg_id})"), None));
+
+            channels.push(TgDialog {
+                name,
+                chat_type,
+                username,
+                tg_id,
+            });
+        }
+
+        if is_final || dialogs.is_empty() {
+            break;
+        }
+
+        // Update pagination offsets
+        exclude_pinned = true;
+        if let Some(last_msg) = messages.last() {
+            match last_msg {
+                tl::enums::Message::Message(m) => {
+                    offset_date = m.date;
+                    offset_id = m.id;
+                }
+                tl::enums::Message::Service(m) => {
+                    offset_date = m.date;
+                    offset_id = m.id;
+                }
+                _ => break,
+            }
+        }
+        if let Some(tl::enums::Dialog::Dialog(d)) = dialogs.last() {
+            offset_peer = match &d.peer {
+                tl::enums::Peer::User(u) => {
+                    // Find access_hash from users
+                    let access_hash = users.iter().find_map(|user| match user {
+                        tl::enums::User::User(u2) if u2.id == u.user_id => u2.access_hash,
+                        _ => None,
+                    });
+                    tl::enums::InputPeer::User(tl::types::InputPeerUser {
+                        user_id: u.user_id,
+                        access_hash: access_hash.unwrap_or(0),
+                    })
+                }
+                tl::enums::Peer::Chat(c) => tl::enums::InputPeer::Chat(tl::types::InputPeerChat { chat_id: c.chat_id }),
+                tl::enums::Peer::Channel(c) => {
+                    let access_hash = chats.iter().find_map(|chat| match chat {
+                        tl::enums::Chat::Channel(ch) if ch.id == c.channel_id => Some(ch.access_hash.unwrap_or(0)),
+                        _ => None,
+                    });
+                    tl::enums::InputPeer::Channel(tl::types::InputPeerChannel {
+                        channel_id: c.channel_id,
+                        access_hash: access_hash.unwrap_or(0),
+                    })
+                }
+            };
+        }
+    }
+
+    Ok(TgFolder {
+        name: "Archived".to_string(),
+        channels,
+    })
+}
+
+/// Fetch the "about" description for a channel or group.
+/// For channels, needs a username to resolve the access_hash.
+/// For groups (basic chats), only needs the chat_id.
+/// Returns None if the chat doesn't have a description or on error.
+pub async fn fetch_chat_about(client: &Client, dialog: &TgDialog) -> Option<String> {
+    let result = match dialog.chat_type {
+        TgChatType::Channel => {
+            // Channels need access_hash; resolve via username if available
+            let username = dialog.username.as_deref()?;
+            let peer = client.resolve_username(username).await.ok()?;
+            let input_channel = match peer {
+                Some(ClientPeer::Channel(ch)) => {
+                    let peer_ref = ch.to_ref().await?;
+                    let input_peer: tl::enums::InputPeer = (&peer_ref).into();
+                    match input_peer {
+                        tl::enums::InputPeer::Channel(c) => tl::enums::InputChannel::Channel(tl::types::InputChannel {
+                            channel_id: c.channel_id,
+                            access_hash: c.access_hash,
+                        }),
+                        _ => return None,
+                    }
+                }
+                // Supergroups also appear as Channel in resolve_username
+                _ => return None,
+            };
+            let request = tl::functions::channels::GetFullChannel { channel: input_channel };
+            client.invoke(&request).await.ok()
+        }
+        TgChatType::Group => {
+            let request = tl::functions::messages::GetFullChat { chat_id: dialog.tg_id };
+            client.invoke(&request).await.ok()
+        }
+    };
+
+    let response = result?;
+    let tl::enums::messages::ChatFull::Full(full) = response;
+    let about = match full.full_chat {
+        tl::enums::ChatFull::Full(f) => f.about,
+        tl::enums::ChatFull::ChannelFull(f) => f.about,
+    };
+
+    if about.is_empty() { None } else { Some(about) }
 }
 
 /// Extract the text title from a TextWithEntities enum.

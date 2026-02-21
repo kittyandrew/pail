@@ -19,6 +19,7 @@
 | [Config](specs/config.md) | TOML + DB dual config, validation |
 | [Docker](specs/docker.md) | Image build, compose, CI/CD |
 | [Interactive Mode](specs/interactive-mode.md) | opencode TUI session with collected source data |
+| [CLI Config Editor](specs/cli-config-editor.md) | Interactive TUI for managing Telegram sources in config |
 
 ## Ideas (not yet implemented)
 
@@ -27,7 +28,6 @@
 | [Web UI](ideas/web-ui.md) | Large | — |
 | [Multi-User](ideas/multi-user.md) | Large | Web UI |
 | [Discord Source](ideas/discord-source.md) | Large | Blocked on feasibility research |
-| [CLI Config Editor](ideas/cli-config-editor.md) | Medium | — |
 | [Image Support](ideas/image-support.md) | Medium | — |
 | [Full-Text Extraction](ideas/full-text-extraction.md) | Medium | — |
 | [MCP Tools](ideas/mcp-tools.md) | Medium | — |

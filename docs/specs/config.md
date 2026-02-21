@@ -69,7 +69,6 @@ description = "Ukrainian tech industry news channel, posts in Ukrainian"
 name = "News Folder"
 type = "telegram_folder"
 tg_folder_name = "News"
-exclude = ["@some_noisy_channel"]
 
 [[output_channel]]
 name = "Morning Tech Digest"

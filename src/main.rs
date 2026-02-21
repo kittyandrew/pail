@@ -1,6 +1,7 @@
 mod cleanup;
 mod cli;
 mod config;
+mod config_edit;
 mod daemon;
 mod db;
 mod error;
@@ -16,6 +17,7 @@ mod store;
 mod telegram;
 mod tg_listener;
 mod tg_session;
+mod tui;
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -23,7 +25,7 @@ use sqlx::SqlitePool;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
-use crate::cli::{Cli, Commands, TgCommands};
+use crate::cli::{Cli, Commands, ConfigCommands, TgCommands};
 use crate::config::{Config, OutputChannelConfig, load_config, validate_config};
 use crate::telegram::TgConnection;
 
@@ -161,9 +163,45 @@ async fn main() -> Result<()> {
     info!("config validated successfully");
 
     match cli.command {
-        Some(Commands::Validate) => {
-            println!("Configuration is valid.");
-        }
+        Some(Commands::Config { command }) => match command {
+            ConfigCommands::Validate => {
+                println!("Configuration is valid.");
+            }
+            ConfigCommands::Edit => {
+                // Try to connect to Telegram if enabled and configured
+                let tg_conn = if config.telegram.enabled
+                    && config.telegram.api_id.is_some_and(|id| id != 0)
+                    && config.telegram.api_hash.as_deref().is_some_and(|h| !h.is_empty())
+                {
+                    let pool = db::create_pool(&config).await.context("creating database")?;
+                    match telegram::connect(&config, &pool).await {
+                        Ok(conn) => match conn.client.is_authorized().await {
+                            Ok(true) => Some(conn),
+                            _ => {
+                                println!("Telegram session not authorized. Run 'pail tg login' first.");
+                                None
+                            }
+                        },
+                        Err(e) => {
+                            println!("Could not connect to Telegram: {e:#}");
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
+
+                let result = tui::run_config_editor(&cli.config, tg_conn.as_ref()).await;
+
+                // Cleanup TG connection
+                if let Some(conn) = tg_conn {
+                    conn.client.disconnect();
+                    conn.runner_handle.abort();
+                }
+
+                result?;
+            }
+        },
         Some(Commands::Generate {
             slug,
             output,
