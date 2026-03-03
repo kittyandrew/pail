@@ -10,6 +10,7 @@ use sqlx::SqlitePool;
 use subtle::ConstantTimeEq;
 use tracing::{debug, warn};
 
+use crate::generate::sanitize_xml_text;
 use crate::store;
 
 #[derive(Clone)]
@@ -230,9 +231,13 @@ fn build_atom_feed(
                 ..Default::default()
             };
 
+            // Sanitize at feed-serving time as a safety net: articles already in the DB
+            // may contain invalid XML control characters from older LLM generations
+            // (e.g. U+0019 instead of apostrophe). parse_output() now sanitizes on ingest,
+            // but this covers articles generated before that fix was deployed.
             let content = Content {
                 content_type: Some("html".to_string()),
-                value: Some(article.body_html.clone()),
+                value: Some(sanitize_xml_text(&article.body_html)),
                 ..Default::default()
             };
 
@@ -245,7 +250,7 @@ fn build_atom_feed(
 
             Entry {
                 id: format!("urn:uuid:{}", article.id),
-                title: Text::plain(&article.title),
+                title: Text::plain(sanitize_xml_text(&article.title)),
                 updated: to_fixed(&article.generated_at),
                 authors: vec![author],
                 content: Some(content),

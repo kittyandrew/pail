@@ -731,7 +731,92 @@ fn parse_output(content: &str) -> Result<(String, Vec<String>, String)> {
         return Err(GenerationError::OutputParse("article body is empty".to_string()).into());
     }
 
+    let title = sanitize_xml_text(&title);
+    let body = sanitize_xml_text(&body);
+
     Ok((title, topics, body))
+}
+
+/// Sanitize text for XML 1.0 validity.
+///
+/// LLMs sometimes emit control characters that are invalid in XML 1.0 or render as
+/// garbage due to Windows-1252/Unicode encoding confusion in training data.
+///
+/// Tier A — Invalid XML 1.0 (C0 controls except \t, \n, \r):
+///   XML 1.0 §2.2 restricts Char to #x9 | #xA | #xD | [#x20-#xD7FF] | ...
+///   These cannot appear even as character references (§4.1 "Legal Character").
+///   U+0019 is replaced with apostrophe (observed in gpt-5-nano output as corrupted ').
+///   Other C0 controls and U+FFFE/U+FFFF are stripped.
+///
+/// Tier B — Valid XML but garbled (C1 range U+0080-U+009F):
+///   Windows-1252 positions 0x80-0x9F contain printable characters (smart quotes,
+///   dashes, euro sign) that ISO-8859-1 reserves for C1 control codes. When training
+///   data is processed with wrong encoding, models learn to emit C1 control code points
+///   where they mean the Windows-1252 character. These are valid XML but render as
+///   invisible/garbage in most contexts.
+///
+/// References:
+/// - XML 1.0 Char production: https://www.w3.org/TR/xml/#charsets
+/// - Windows-1252 vs ISO-8859-1: https://www.i18nqa.com/debug/table-iso8859-1-vs-windows-1252.html
+/// - Hugo RSS fix (same class of bug): https://github.com/gohugoio/hugo/pull/11738
+/// - WordPress esc_xml(): https://core.trac.wordpress.org/ticket/19998
+/// - OpenAI encoding issues: https://community.openai.com/t/gpt-4-1-character-encoding-issues/1236017
+pub(crate) fn sanitize_xml_text(s: &str) -> String {
+    let mut stripped: Vec<u32> = Vec::new();
+    let result: String = s
+        .chars()
+        .filter_map(|c| match c {
+            // Tier A: C0 controls — invalid in XML 1.0
+            '\x19' => Some('\''),          // END OF MEDIUM → apostrophe
+            '\t' | '\n' | '\r' => Some(c), // the only valid C0 controls in XML
+            c if c < '\u{20}' => {
+                stripped.push(c as u32);
+                None
+            }
+            '\u{FFFE}' | '\u{FFFF}' => {
+                stripped.push(c as u32);
+                None
+            }
+
+            // Tier B: C1 range — valid XML but Windows-1252 encoding ghosts
+            '\u{80}' => Some('\u{20AC}'), // euro sign
+            '\u{82}' => Some('\u{201A}'), // single low-9 quotation mark
+            '\u{83}' => Some('\u{0192}'), // latin small f with hook
+            '\u{84}' => Some('\u{201E}'), // double low-9 quotation mark
+            '\u{85}' => Some('\u{2026}'), // horizontal ellipsis
+            '\u{86}' => Some('\u{2020}'), // dagger
+            '\u{87}' => Some('\u{2021}'), // double dagger
+            '\u{88}' => Some('\u{02C6}'), // modifier letter circumflex accent
+            '\u{89}' => Some('\u{2030}'), // per mille sign
+            '\u{8A}' => Some('\u{0160}'), // latin capital letter S with caron
+            '\u{8B}' => Some('\u{2039}'), // single left-pointing angle quotation
+            '\u{8C}' => Some('\u{0152}'), // latin capital ligature OE
+            '\u{8E}' => Some('\u{017D}'), // latin capital letter Z with caron
+            '\u{91}' => Some('\u{2018}'), // left single quotation mark
+            '\u{92}' => Some('\u{2019}'), // right single quotation mark
+            '\u{93}' => Some('\u{201C}'), // left double quotation mark
+            '\u{94}' => Some('\u{201D}'), // right double quotation mark
+            '\u{95}' => Some('\u{2022}'), // bullet
+            '\u{96}' => Some('\u{2013}'), // en dash
+            '\u{97}' => Some('\u{2014}'), // em dash
+            '\u{98}' => Some('\u{02DC}'), // small tilde
+            '\u{99}' => Some('\u{2122}'), // trade mark sign
+            '\u{9A}' => Some('\u{0161}'), // latin small letter s with caron
+            '\u{9B}' => Some('\u{203A}'), // single right-pointing angle quotation
+            '\u{9C}' => Some('\u{0153}'), // latin small ligature oe
+            '\u{9E}' => Some('\u{017E}'), // latin small letter z with caron
+            '\u{9F}' => Some('\u{0178}'), // latin capital letter Y with diaeresis
+
+            _ => Some(c),
+        })
+        .collect();
+    if !stripped.is_empty() {
+        warn!(
+            chars = ?stripped.iter().map(|c| format!("U+{c:04X}")).collect::<Vec<_>>(),
+            "stripped invalid XML control characters from LLM output"
+        );
+    }
+    result
 }
 
 fn markdown_to_html(markdown: &str) -> String {

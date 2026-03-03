@@ -243,3 +243,7 @@ variant = "max"
 - **Generation concurrency:** configurable semaphore, default 1 (serialized).
   Options: always serialized / always parallel / configurable.
   Rationale: serialized is safest default (predictable resources, no parallel API costs). Power users with many channels can increase.
+
+- **LLM output sanitization:** replace/strip characters invalid in XML 1.0 before rendering.
+  Options: sanitize in parse_output / sanitize in Atom serializer / patch quick-xml / switch to XML 1.1.
+  Rationale: XML 1.0 (mandated by Atom RFC 4287) forbids C0 controls except \t, \n, \r — even as character references. Neither quick-xml nor atom_syndication sanitize these. XML 1.1 is dead and wouldn't help (only allows them as references, not directly). Sanitized in two places: parse_output (cleans on ingest) and build_atom_feed (safety net for articles already in DB from before the fix). Two tiers: Tier A replaces/strips invalid XML chars (U+0019→apostrophe observed in gpt-5-nano); Tier B maps C1 range (U+0080-U+009F) from Windows-1252 ghosts to correct Unicode (smart quotes, dashes, etc.). See `sanitize_xml_text()` in `generate.rs`.
