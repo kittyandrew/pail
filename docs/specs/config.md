@@ -35,7 +35,7 @@ path = "pail.db"                    # resolves to <data_dir>/pail.db
 
 [opencode]
 binary = "opencode"
-default_model = "opencode/kimi-k2.5-free"
+default_model = "opencode/big-pickle"
 timeout = "10m"
 max_retries = 1
 system_prompt = """..."""            # required, must contain {editorial_directive}
@@ -75,7 +75,7 @@ exclude = ["@some_noisy_channel"]
 name = "Morning Tech Digest"
 slug = "tech-morning"
 schedule = "at:08:00"
-model = "opencode/kimi-k2.5-free"
+model = "opencode/big-pickle"
 sources = ["Hacker News", "Lobsters", "Ukrainian Tech News"]
 prompt = """
 Write a morning tech digest for a senior software engineer.

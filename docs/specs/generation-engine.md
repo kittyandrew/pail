@@ -148,7 +148,7 @@ pail allows configuring:
 
 **Implicit behavior:** pail always sets `OPENCODE_ENABLE_EXA=1` in the opencode subprocess environment, enabling websearch tools. LLM API keys and other environment variables are inherited naturally from the parent process.
 
-**Default model:** `opencode/kimi-k2.5-free` — a free model available without authentication. Model format is `provider/model` without date suffix.
+**Default model:** `opencode/big-pickle` — a free model available without authentication. Model format is `provider/model` without date suffix.
 
 **Authentication:** opencode manages its own auth — pail does not handle LLM API keys directly. Supports `opencode auth login`, `/connect` in TUI mode for OAuth, and environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.).
 
@@ -186,7 +186,7 @@ When set to 1, generations are queued and processed one at a time. Higher values
 ```toml
 [opencode]
 binary = "opencode"
-default_model = "opencode/kimi-k2.5-free"
+default_model = "opencode/big-pickle"
 timeout = "10m"
 max_retries = 1
 system_prompt = """..."""   # required, must contain {editorial_directive}
@@ -216,9 +216,9 @@ variant = "max"
   Options: `extra_args` CLI flags / `opencode.json` project config / both.
   Rationale: CLI flags like `--variant` only work with `opencode run`, not TUI mode. `opencode.json` works for both modes and maps directly to opencode's config schema — any setting opencode supports can be set without pail code changes.
 
-- **Default model:** `opencode/kimi-k2.5-free` (free, no auth needed).
-  Options: `opencode/big-pickle` / `opencode/kimi-k2.5-free` / `anthropic/claude-sonnet-4-5` / no default (require user to set).
-  Rationale: free model means zero-config works out of the box. Switched from big-pickle to kimi-k2.5-free for better quality.
+- **Default model:** `opencode/big-pickle` (free, no auth needed).
+  Options: `opencode/big-pickle` / `opencode/minimax-m2.5-free` / `anthropic/claude-sonnet-4-5` / no default (require user to set).
+  Rationale: free model means zero-config works out of the box. Switched back to big-pickle after kimi-k2.5-free was removed from opencode.
 
 - **Model format:** `provider/model` without date suffix.
   Options: with date suffix / without date suffix / model name only.

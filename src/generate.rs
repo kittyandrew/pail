@@ -115,7 +115,7 @@ pub async fn prepare_workspace(
         .model
         .as_deref()
         .or(config.opencode.default_model.as_deref())
-        .unwrap_or("opencode/kimi-k2.5-free")
+        .unwrap_or("opencode/big-pickle")
         .to_string();
 
     Ok(PreparedWorkspace { dir: workspace, model })
