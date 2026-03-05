@@ -25,6 +25,8 @@ retention = "7d"                    # content retention period
 timezone = "Europe/Kyiv"            # user timezone for schedule interpretation (default: UTC)
 log_level = "info,grammers_session=warn,grammers_mtsender=warn,grammers_mtproto=warn"
 max_concurrent_generations = 1
+default_strategy = "simple"             # default generation strategy (simple/agentic/brief or user-defined)
+# strategies_dir = "./my-strategies"    # optional path to user-defined strategies
 # feed_token = "my-secret-token"  # optional: if omitted, auto-generated on first run
 
 [database]
@@ -36,9 +38,6 @@ path = "pail.db"                    # resolves to <data_dir>/pail.db
 [opencode]
 binary = "opencode"
 default_model = "opencode/big-pickle"
-timeout = "10m"
-max_retries = 1
-system_prompt = """..."""            # required, must contain {editorial_directive}
 
 [telegram]
 enabled = false
@@ -75,6 +74,7 @@ name = "Morning Tech Digest"
 slug = "tech-morning"
 schedule = "at:08:00"
 model = "opencode/big-pickle"
+# strategy = "agentic"                # optional per-channel strategy override
 sources = ["Hacker News", "Lobsters", "Ukrainian Tech News"]
 prompt = """
 Write a morning tech digest for a senior software engineer.
@@ -107,8 +107,8 @@ On startup:
 7. Validate source names: must contain at least one alphanumeric character; allowed characters are letters, digits, spaces, `- _ . ( ) & , + '`
 8. Validate source descriptions (if provided): no control characters, double quotes, or backslashes
 9. Validate output channel slugs: non-empty, lowercase letters + digits + hyphens only, cannot start or end with hyphen
-10. Validate system prompt: must be non-empty and contain `{editorial_directive}` placeholder
-11. Validate duration fields (`retention`, `opencode.timeout`): parsed via `humantime`
+10. Validate strategy references: `default_strategy` and per-channel `strategy` must resolve to a built-in or user-defined strategy
+11. Validate duration fields (`retention`): parsed via `humantime`
 
 ## Source Removal Cascade
 

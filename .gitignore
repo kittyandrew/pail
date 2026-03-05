@@ -7,3 +7,6 @@ config.toml
 result
 digest.md
 article.md
+# Benchmark data — results, rubrics, reports. All generated, not source.
+# Consider tracking later: benchmark-report.md, rubrics/*.json, results/*/summary.md
+benchmarks/

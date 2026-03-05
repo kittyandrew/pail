@@ -6,7 +6,7 @@ use serde::Deserialize;
 
 use crate::error::ConfigError;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     pub pail: PailConfig,
     #[serde(default)]
@@ -21,7 +21,7 @@ pub struct Config {
     pub output_channel: Vec<OutputChannelConfig>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct PailConfig {
     #[serde(default = "default_version")]
     pub version: u32,
@@ -38,6 +38,9 @@ pub struct PailConfig {
     #[serde(default = "default_listen")]
     pub listen: String,
     pub feed_token: Option<String>,
+    #[serde(default = "default_strategy")]
+    pub default_strategy: String,
+    pub strategies_dir: Option<PathBuf>,
 }
 
 fn default_version() -> u32 {
@@ -63,8 +66,11 @@ fn default_max_concurrent() -> u32 {
 fn default_listen() -> String {
     "0.0.0.0:8080".to_string()
 }
+fn default_strategy() -> String {
+    "simple".to_string()
+}
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct DatabaseConfig {
     #[serde(default = "default_db_path")]
     pub path: String,
@@ -82,21 +88,12 @@ fn default_db_path() -> String {
     "pail.db".to_string()
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct OpencodeConfig {
     #[serde(default = "default_opencode_binary")]
     pub binary: String,
     #[serde(default)]
     pub default_model: Option<String>,
-    #[serde(default = "default_timeout")]
-    pub timeout: String,
-    #[serde(default = "default_max_retries")]
-    pub max_retries: u32,
-    /// Free-form table written as `opencode.json` in the workspace.
-    #[serde(default = "default_project_config")]
-    pub project_config: serde_json::Value,
-    #[serde(default)]
-    pub system_prompt: String,
 }
 
 impl Default for OpencodeConfig {
@@ -104,15 +101,11 @@ impl Default for OpencodeConfig {
         Self {
             binary: default_opencode_binary(),
             default_model: None,
-            timeout: default_timeout(),
-            max_retries: default_max_retries(),
-            project_config: serde_json::Value::Object(serde_json::Map::new()),
-            system_prompt: String::new(),
         }
     }
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct TelegramConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -120,17 +113,8 @@ pub struct TelegramConfig {
     pub api_hash: Option<String>,
 }
 
-fn default_project_config() -> serde_json::Value {
-    serde_json::Value::Object(serde_json::Map::new())
-}
 fn default_opencode_binary() -> String {
     "opencode".to_string()
-}
-fn default_timeout() -> String {
-    "10m".to_string()
-}
-fn default_max_retries() -> u32 {
-    1
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -187,6 +171,7 @@ pub struct OutputChannelConfig {
     pub mark_tg_read: Option<bool>,
     #[serde(default = "default_channel_enabled")]
     pub enabled: Option<bool>,
+    pub strategy: Option<String>,
 }
 
 fn default_channel_enabled() -> Option<bool> {
@@ -454,23 +439,6 @@ pub fn validate_config(config: &Config) -> Result<()> {
         .timezone
         .parse::<chrono_tz::Tz>()
         .map_err(|_| ConfigError::Validation(format!("unknown timezone '{}'", config.pail.timezone)))?;
-
-    // Validate system prompt
-    if config.opencode.system_prompt.trim().is_empty() {
-        return Err(
-            ConfigError::Validation("[opencode].system_prompt is required and must not be empty".to_string()).into(),
-        );
-    }
-    if !config.opencode.system_prompt.contains("{editorial_directive}") {
-        return Err(ConfigError::Validation(
-            "[opencode].system_prompt must contain the {editorial_directive} placeholder".to_string(),
-        )
-        .into());
-    }
-
-    // Validate opencode timeout
-    humantime::parse_duration(&config.opencode.timeout)
-        .map_err(|e| ConfigError::Validation(format!("opencode timeout '{}': {}", config.opencode.timeout, e)))?;
 
     // Validate retention
     humantime::parse_duration(&config.pail.retention)

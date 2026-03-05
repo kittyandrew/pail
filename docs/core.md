@@ -230,6 +230,7 @@ generated_article {
     generation_log: String     # opencode stdout/stderr for debugging
     model_used: String         # which model opencode actually used
     token_count: Option<i64>   # if reported by opencode
+    strategy_used: String      # generation strategy name (e.g., "simple", "agentic"); "legacy" for pre-strategy articles
 }
 ```
 

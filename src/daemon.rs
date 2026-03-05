@@ -10,9 +10,10 @@ use tracing::{error, info, warn};
 use rand::distr::Alphanumeric;
 
 use crate::config::Config;
+use crate::strategy::StrategyRegistry;
 use crate::{cleanup, db, poller, scheduler, server, store, telegram, tg_listener};
 
-pub async fn run(config: Config) -> Result<()> {
+pub async fn run(config: Config, registry: StrategyRegistry) -> Result<()> {
     let pool = db::create_pool(&config).await.context("creating database")?;
     info!(db_path = %config.db_path().display(), "database ready");
 
@@ -26,6 +27,7 @@ pub async fn run(config: Config) -> Result<()> {
     let feed_token = bootstrap_feed_token(&pool, &config).await?;
 
     let config = Arc::new(config);
+    let registry = Arc::new(registry);
     let cancel = CancellationToken::new();
     let semaphore = Arc::new(Semaphore::new(config.pail.max_concurrent_generations as usize));
 
@@ -46,6 +48,7 @@ pub async fn run(config: Config) -> Result<()> {
     let scheduler_handle = tokio::spawn(scheduler::scheduler_loop(
         pool.clone(),
         config.clone(),
+        registry,
         semaphore.clone(),
         tg_client,
         cancel.clone(),

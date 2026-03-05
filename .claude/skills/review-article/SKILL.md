@@ -12,9 +12,9 @@ You are reviewing a generated pail digest article for quality and compliance wit
 
 ## Phase 1: Build the Checklist
 
-1. **Load the full project spec** — follow CLAUDE.md to locate and read the spec.
-2. **Load the system prompt** — read `config.example.toml` and extract the full `system_prompt` value.
-3. **Derive review criteria** from the spec and system prompt. Read them carefully and generate a comprehensive checklist of every quality rule, editorial requirement, and formatting constraint the article must satisfy. Do not rely on a hardcoded list — the spec and prompt evolve.
+1. **Load the relevant specs** — read `docs/specs/generation-engine.md` (workspace, prompt template, output parsing) and `docs/core.md` (architecture, data model). If reviewing a specific source type, also read its spec (e.g., `docs/specs/rss-sources.md`, `docs/specs/telegram.md`).
+2. **Load the strategy prompt** — check which strategy was used (from the article's frontmatter `strategy_used` field, or ask the user). Read the corresponding prompt from `src/strategies/<name>/prompt.md`. If unknown, default to reading `src/strategies/simple/prompt.md`.
+3. **Derive review criteria** from the spec and strategy prompt. Read them carefully and generate a comprehensive checklist of every quality rule, editorial requirement, and formatting constraint the article must satisfy. Do not rely on a hardcoded list — the spec and prompt evolve.
 
 ## Phase 2: Get the Article
 

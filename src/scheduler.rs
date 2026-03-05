@@ -13,6 +13,7 @@ use tracing::{debug, error, info, warn};
 use crate::config::Config;
 use crate::pipeline;
 use crate::store;
+use crate::strategy::StrategyRegistry;
 
 /// RAII guard that removes a channel ID from the in-flight set on drop.
 /// Ensures cleanup even if the generation task panics.
@@ -166,6 +167,7 @@ fn parse_weekday(s: &str) -> Result<Weekday> {
 pub async fn scheduler_loop(
     pool: SqlitePool,
     config: Arc<Config>,
+    registry: Arc<StrategyRegistry>,
     semaphore: Arc<Semaphore>,
     tg_client: Option<grammers_client::Client>,
     cancel: CancellationToken,
@@ -255,6 +257,7 @@ pub async fn scheduler_loop(
 
             let pool = pool.clone();
             let config = config.clone();
+            let registry = registry.clone();
             let semaphore = semaphore.clone();
             let tg_client = tg_client.clone();
             let cancel = cancel.clone();
@@ -279,8 +282,18 @@ pub async fn scheduler_loop(
 
                 info!(channel = %channel_config.name, "scheduled generation starting");
 
-                match pipeline::run_generation(&pool, &config, &channel_config, None, false, tg_client.as_ref(), cancel)
-                    .await
+                match pipeline::run_generation(
+                    &pool,
+                    &config,
+                    &channel_config,
+                    &registry,
+                    None, // no strategy override in daemon mode
+                    None,
+                    false,
+                    tg_client.as_ref(),
+                    cancel,
+                )
+                .await
                 {
                     Ok(Some(r)) => {
                         info!(channel = %channel_config.name, title = %r.article.title, "scheduled generation complete");

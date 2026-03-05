@@ -72,6 +72,7 @@ pub struct GeneratedArticle {
     pub generation_log: String,
     pub model_used: String,
     pub token_count: Option<i64>,
+    pub strategy_used: String,
 }
 
 /// Read model for articles from DB (used by Atom feed builder).
@@ -90,4 +91,5 @@ pub struct GeneratedArticleRow {
     pub generation_log: String,
     pub model_used: String,
     pub token_count: Option<i64>,
+    pub strategy_used: String,
 }

@@ -14,6 +14,7 @@ use tokio::io::AsyncReadExt;
 use crate::config::{Config, OutputChannelConfig};
 use crate::error::GenerationError;
 use crate::models::{ContentItem, GeneratedArticle, OutputChannel, Source};
+use crate::strategy::{self, Strategy};
 
 /// Key for grouping content items in the workspace.
 /// Non-folder sources group by source_id; folder sources split into per-channel groups.
@@ -31,23 +32,6 @@ struct SourceFileInfo {
     slug: String,
 }
 
-/// Returns the `## Workspace` section describing the workspace file layout.
-/// When `include_output_md` is true, includes the `output.md` bullet (for generation mode).
-/// When false, omits it (for interactive mode where there's no output file).
-pub fn workspace_context(include_output_md: bool) -> String {
-    let mut ctx = String::from(
-        "\n## Workspace\n\
-         All input data is in the current directory:\n\
-         - `manifest.json` — generation metadata (channel config, time window, source list)\n\
-         - `sources/` — one markdown file per source (`<slug>.md`), each with a YAML frontmatter\n\
-         \x20 header (name, type, item_count, description) followed by content items separated by `---`\n",
-    );
-    if include_output_md {
-        ctx.push_str("- `output.md` — write the final article HERE\n");
-    }
-    ctx
-}
-
 /// A prepared workspace directory with source data written and model resolved.
 pub struct PreparedWorkspace {
     /// The temporary directory. Dropped when this struct is dropped (auto-cleanup).
@@ -62,12 +46,14 @@ impl PreparedWorkspace {
     }
 }
 
-/// Prepare a workspace directory with manifest.json and sources/.
+/// Prepare a workspace directory with manifest.json, sources/, opencode.json, and tools.
 /// Does NOT write prompt.md or output.md — those are mode-specific.
 #[allow(clippy::too_many_arguments)]
 pub async fn prepare_workspace(
     config: &Config,
     channel_config: &OutputChannelConfig,
+    strategy: &Strategy,
+    merged_opencode_config: &serde_json::Value,
     items: &[ContentItem],
     source_map: &HashMap<String, &Source>,
     folder_channels: &HashMap<String, HashMap<i64, (String, Option<String>)>>,
@@ -80,7 +66,7 @@ pub async fn prepare_workspace(
         .map_err(GenerationError::Workspace)?;
 
     let ws_path = workspace.path();
-    info!(workspace = %ws_path.display(), "preparing workspace");
+    info!(workspace = %ws_path.display(), strategy = %strategy.meta.name, "preparing workspace");
 
     let keys: Vec<SourceKey> = items
         .iter()
@@ -107,9 +93,13 @@ pub async fn prepare_workspace(
         .await
         .context("writing source content")?;
 
-    write_opencode_config(ws_path, &config.opencode.project_config)
+    write_opencode_config(ws_path, merged_opencode_config)
         .await
         .context("writing opencode.json")?;
+
+    write_strategy_tools(ws_path, strategy)
+        .await
+        .context("writing strategy tools")?;
 
     let model = channel_config
         .model
@@ -122,8 +112,8 @@ pub async fn prepare_workspace(
 }
 
 /// Write an `AGENTS.md` file to the workspace with workspace context (for interactive mode).
-pub async fn write_agents_md(ws_path: &Path) -> Result<()> {
-    let content = workspace_context(false);
+pub async fn write_agents_md(ws_path: &Path, strategy: &Strategy) -> Result<()> {
+    let content = strategy::workspace_context(strategy, false);
     tokio::fs::write(ws_path.join("AGENTS.md"), &content)
         .await
         .map_err(GenerationError::Workspace)?;
@@ -131,14 +121,41 @@ pub async fn write_agents_md(ws_path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Write an `opencode.json` project config from `[opencode.project_config]`.
-/// The config value is written as-is — defaults (share, variant) come from config.toml.
+/// Write an `opencode.json` project config (merged base + strategy overlay).
 pub async fn write_opencode_config(ws_path: &Path, project_config: &serde_json::Value) -> Result<()> {
     let content = serde_json::to_string_pretty(project_config).context("serializing opencode config")?;
     tokio::fs::write(ws_path.join("opencode.json"), content)
         .await
         .map_err(GenerationError::Workspace)?;
     debug!("wrote opencode.json");
+    Ok(())
+}
+
+/// Write strategy tools to `.opencode/tools/` and merged `package.json` to `.opencode/`.
+async fn write_strategy_tools(ws_path: &Path, strategy: &Strategy) -> Result<()> {
+    let resolved = strategy::resolve_tools(strategy)?;
+
+    if resolved.tool_files.is_empty() {
+        return Ok(());
+    }
+
+    let tools_dir = ws_path.join(".opencode").join("tools");
+    tokio::fs::create_dir_all(&tools_dir)
+        .await
+        .map_err(GenerationError::Workspace)?;
+
+    for (filename, content) in &resolved.tool_files {
+        tokio::fs::write(tools_dir.join(filename), content)
+            .await
+            .map_err(GenerationError::Workspace)?;
+    }
+
+    let pkg_str = serde_json::to_string_pretty(&resolved.package_json).context("serializing package.json")?;
+    tokio::fs::write(ws_path.join(".opencode").join("package.json"), pkg_str)
+        .await
+        .map_err(GenerationError::Workspace)?;
+
+    debug!("wrote .opencode/tools/");
     Ok(())
 }
 
@@ -261,6 +278,8 @@ fn build_source_file_infos(
 pub async fn generate_article(
     config: &Config,
     channel_config: &OutputChannelConfig,
+    strategy: &Strategy,
+    merged_opencode_config: &serde_json::Value,
     channel: &OutputChannel,
     items: &[ContentItem],
     source_map: &HashMap<String, &Source>,
@@ -272,6 +291,8 @@ pub async fn generate_article(
     let ws = prepare_workspace(
         config,
         channel_config,
+        strategy,
+        merged_opencode_config,
         items,
         source_map,
         folder_channels,
@@ -283,7 +304,7 @@ pub async fn generate_article(
 
     let ws_path = ws.path();
 
-    let prompt = write_prompt(ws_path, config, channel_config)
+    let prompt = write_prompt(ws_path, strategy, channel_config)
         .await
         .context("writing prompt")?;
 
@@ -298,7 +319,7 @@ pub async fn generate_article(
         ws_path,
         &ws.model,
         &prompt,
-        &config.opencode.timeout,
+        &strategy.meta.timeout,
         cancel,
     )
     .await
@@ -358,6 +379,7 @@ pub async fn generate_article(
         generation_log,
         model_used: ws.model.clone(),
         token_count: None,
+        strategy_used: strategy.meta.name.clone(),
     };
 
     // Workspace is cleaned up when `ws` is dropped
@@ -422,14 +444,17 @@ async fn write_manifest(
     Ok(())
 }
 
-async fn write_prompt(ws_path: &Path, config: &Config, channel_config: &OutputChannelConfig) -> Result<String> {
-    let rendered = config
-        .opencode
-        .system_prompt
+pub(crate) async fn write_prompt(
+    ws_path: &Path,
+    strategy: &Strategy,
+    channel_config: &OutputChannelConfig,
+) -> Result<String> {
+    let rendered = strategy
+        .prompt_body
         .replace("{editorial_directive}", channel_config.prompt.trim());
 
     // Prepend the workspace context (with output.md bullet) so it's defined in code once
-    let prompt = format!("{}{}", workspace_context(true), rendered);
+    let prompt = format!("{}{}", strategy::workspace_context(strategy, true), rendered);
 
     // Write to workspace for debugging/inspection only
     tokio::fs::write(ws_path.join("prompt.md"), &prompt)
@@ -571,7 +596,7 @@ fn format_content_item(item: &ContentItem) -> String {
     md
 }
 
-async fn invoke_opencode(
+pub(crate) async fn invoke_opencode(
     binary: &str,
     workspace: &Path,
     model: &str,

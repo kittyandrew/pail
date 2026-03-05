@@ -1,4 +1,4 @@
-use atom_syndication::{Category, Content, Entry, Feed, Link, Person, Text};
+use atom_syndication::{Category, Content, Entry, Feed, Generator, Link, Person, Text};
 use axum::Router;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
@@ -214,15 +214,20 @@ fn build_atom_feed(
     let entries: Vec<Entry> = articles
         .iter()
         .map(|article| {
-            // Parse topics from JSON
+            // Parse topics from JSON + strategy category
             let topics: Vec<String> = serde_json::from_str(&article.topics).unwrap_or_default();
-            let categories: Vec<Category> = topics
+            let mut categories: Vec<Category> = topics
                 .into_iter()
                 .map(|t| Category {
                     term: t,
                     ..Default::default()
                 })
                 .collect();
+            categories.push(Category {
+                term: format!("strategy:{}", article.strategy_used),
+                scheme: Some("urn:pail:strategy".to_string()),
+                ..Default::default()
+            });
 
             // Derive author from model_used: "anthropic/claude-sonnet-4-5" -> "pail-opencode-claude-sonnet-4-5"
             let model_short = article.model_used.split('/').next_back().unwrap_or(&article.model_used);
@@ -269,11 +274,18 @@ fn build_atom_feed(
         ..Default::default()
     };
 
+    let generator = Generator {
+        value: "pail".to_string(),
+        uri: Some("https://github.com/kittyandrew/pail".to_string()),
+        ..Default::default()
+    };
+
     Feed {
         id: format!("urn:pail:channel:{}", channel.id),
         title: Text::plain(&channel.name),
         subtitle: Some(Text::plain(&channel.name)),
         updated: feed_updated,
+        generator: Some(generator),
         entries,
         links: vec![self_link],
         ..Default::default()

@@ -31,18 +31,27 @@ Query content store for all items from the output channel's sources within the t
 
 ### 2. Prepare Workspace
 
-Create a temporary directory:
+Resolve the generation strategy (channel override → `[pail].default_strategy` → `"simple"`), then create a temporary directory:
+
 ```
 /tmp/pail-gen-<uuid>/
   manifest.json          # metadata: output channel config, time window, source list
-  opencode.json          # project config from [opencode.project_config]
-  prompt.md              # system prompt template with editorial directive inlined
+  opencode.json          # merged opencode config (global base + strategy overlay)
+  prompt.md              # strategy prompt with editorial directive inlined
   output.md              # empty file — opencode writes the article here
   sources/
     <source-slug>.md     # one file per source: YAML frontmatter + content items
+  .opencode/
+    tools/
+      fetch-article.ts   # custom Readability-based article extractor (if strategy uses it)
+    package.json         # npm dependencies for strategy tools
 ```
 
 Each source file has YAML frontmatter (name, type, item_count, description) followed by content items separated by `---`.
+
+**Strategy-driven workspace:** The tools written to `.opencode/tools/` depend on the strategy's `tools` frontmatter list. Built-in tools (e.g., `fetch-article`) are embedded in the binary via `include_str!` from `src/opencode_tools/`. User strategy tools are copied from the strategy directory. opencode auto-discovers tools from `.opencode/tools/*.ts` and auto-installs dependencies from `.opencode/package.json` via `bun install`.
+
+The `opencode.json` is produced by deep-merging a global base config (`src/strategies/opencode.json`) with the strategy's optional overlay. See [Generation Strategies spec](generation-strategies.md) for merge semantics.
 
 **manifest.json schema:**
 ```json
@@ -67,7 +76,7 @@ cd /tmp/pail-gen-<uuid>/ && opencode run \
   "<full rendered prompt text>"
 ```
 
-The workspace includes an `opencode.json` written from `[opencode.project_config]` (defaults include `share: "auto"` and `agent.build.variant: "max"`), so every session is automatically shared and reviewable via a shareable link. stdout/stderr is captured as the generation log. The article is written by the AI agent to `output.md`.
+The workspace includes an `opencode.json` produced by merging the global base config with the strategy's overlay (defaults include `share: "auto"` and `agent.build.variant: "high"`; the agentic strategy overrides to `"max"`). Every session is automatically shared and reviewable via a shareable link. stdout/stderr is captured as the generation log. The article is written by the AI agent to `output.md`.
 
 ### 4. Parse Output
 
@@ -88,6 +97,32 @@ Insert as a new `generated_article` in the DB, update the output channel's `last
 ### 6. Cleanup Workspace
 
 Delete `/tmp/pail-gen-<uuid>/`.
+
+## Context Management
+
+Models can exhaust their context window during generation when fetching raw web pages. Two mechanisms address this:
+
+### Custom Tool: `fetch-article`
+
+opencode's built-in `WebFetch` returns raw HTML→markdown (via turndown), including navigation, sidebars, cookie banners, footers — ~80KB per page where the actual article body is only ~6-18KB. The custom `fetch-article` tool uses Mozilla Readability (the same algorithm behind Firefox Reader View) to extract just the article body, then converts to markdown. Returns ~3K tokens instead of ~25K per article.
+
+The tool source lives at `src/opencode_tools/fetch-article.ts` and is embedded in the binary via `include_str!`. Dependencies (`@mozilla/readability`, `jsdom`, `turndown`) are in `src/opencode_tools/package.json`.
+
+### Researcher Subagent
+
+Defined in the agentic strategy's `opencode.json` overlay (`agent.researcher`). The researcher runs in an isolated session — its fetch-article/WebFetch outputs never enter the parent agent's context. Only its final text response (a structured brief) comes back.
+
+The main agent dispatches research tasks in batches of 3-5 articles via opencode's Task tool with `subagent_type: "researcher"`. Each batch prompt tells the researcher to fetch articles, summarize them, extract key quotes, and fact-check notable claims. The researcher has access to `read`, `glob`, `webfetch`, `websearch`, and `fetch_article` tools; all other tools are denied.
+
+This architecture means the parent agent works from compact briefs (~1-2K tokens per article) rather than raw page content (~25K tokens per article), keeping total context well within limits even for large source sets.
+
+### Verifier Subagent
+
+Defined in the agentic strategy's `opencode.json` overlay (`agent.verifier`). The verifier runs after the main agent writes the article to `output.md`. Its single job: scan every sentence for named sources (books, reports, news articles, studies, datasets, etc.), find URLs for any that lack hyperlinks, and edit the article to add them. If a URL cannot be found after exhaustive searching, the verifier rewrites the passage to remove the unverifiable attribution.
+
+The main agent dispatches the verifier via opencode's Task tool with `subagent_type: "verifier"`. The verifier has access to `read`, `edit`, `write`, `websearch`, and `webfetch` tools; all other tools are denied.
+
+This separation of concerns works because the main agent has competing priorities (writing quality, structure, editorial voice) that cause it to skip or rush reference verification. A dedicated agent with a single mandate — "every named source gets a URL or gets rewritten" — catches references that the main agent's multi-step workflow misses.
 
 ## Article Output Format
 
@@ -113,38 +148,28 @@ topics:
 
 The frontmatter is structured data that pail parses directly. The body after `---` is the article content, converted to HTML for the Atom feed.
 
-## System Prompt Template
+## System Prompt
 
-Defined in `[opencode].system_prompt` in `config.toml` (required, must be non-empty). Must include `{editorial_directive}` as a placeholder, which pail replaces with the output channel's `prompt` field at render time.
+Each generation strategy defines its own system prompt in `prompt.md` (YAML frontmatter + prompt body). The prompt must include `{editorial_directive}` as a placeholder, which pail replaces with the output channel's `prompt` field at render time.
 
-**Workspace context** (the `## Workspace` section describing `manifest.json`, `sources/`, and `output.md`) is generated by code (`generate::workspace_context()`) and prepended to the rendered prompt automatically. This section is NOT part of the config template — it's defined once in code and shared between generate mode (prepended to prompt) and interactive mode (written as `AGENTS.md`).
+**Workspace context** (the `## Workspace` section describing `manifest.json`, `sources/`, tools, and `output.md`) is generated by code (`strategy::workspace_context()`) and prepended to the rendered prompt automatically. This section is NOT part of the strategy prompt — it's defined once in code and shared between generate mode (prepended to prompt) and interactive mode (written as `AGENTS.md`). The workspace context is dynamic — it lists tools based on the strategy's frontmatter rather than hardcoding.
 
-The full default prompt is shipped in `config.example.toml`. It covers:
+Three built-in strategies are shipped in the binary:
+- **`simple`** — direct fetch + write, no subagents, works with any model
+- **`agentic`** — full researcher + verifier subagent pipeline, requires capable models
+- **`brief`** — condensed bullet-point digest, works with any model
 
-- Editorial directive insertion
-- Source reading instructions (manifest, source files)
-- Pre-write research step (websearch/webfetch for claims that need editor's notes)
-- Condensation and fidelity rules
-- RSS source handling (fetch full articles from links)
-- Telegram source handling (threading, forwarded messages, attribution with WRONG/RIGHT examples, link formats)
-- Output format (YAML frontmatter + markdown body)
-- Article body format (sections by topic, hyperlinks to originals, language consistency, Skipped section — no separate Sources section)
-- Editor's Notes (fact-checking blockquotes + inline annotations, no unsourced data, never trust training data over sources)
-- References and citations preservation
-- Post-write URL audit (webfetch every URL not from source files, fix or remove dead links)
-- Link verification rules (never include unverified URLs)
-- Writing style (Reuters correspondent, no AI-smell)
-
-See `config.example.toml` for the full prompt text.
+See [Generation Strategies spec](generation-strategies.md) for strategy details, prompt contents, and user-defined strategies.
 
 ## opencode Configuration
 
 pail allows configuring:
 - Path to opencode binary (default: `opencode` in PATH)
 - Default model in `provider/model` format (can be overridden per output channel)
-- Timeout for generation (default: 10 minutes)
-- Maximum retries on failure (default: 1)
-- Project-level opencode config (`[opencode.project_config]`) — written as `opencode.json` in the workspace
+- Default generation strategy (default: `simple`; can be overridden per output channel)
+- Strategy-specific timeout, retries, tools, and opencode project config
+
+The `opencode.json` workspace config is produced by deep-merging a compiled-in global base (`src/strategies/opencode.json`) with the active strategy's overlay. See [Generation Strategies spec](generation-strategies.md).
 
 **Implicit behavior:** pail always sets `OPENCODE_ENABLE_EXA=1` in the opencode subprocess environment, enabling websearch tools. LLM API keys and other environment variables are inherited naturally from the parent process.
 
@@ -156,7 +181,7 @@ pail allows configuring:
 
 When generation fails (opencode timeout, API error, malformed output):
 
-1. **First failure:** Log the full error at ERROR level. Retry once after **30 seconds**.
+1. **First failure:** Log the full error at ERROR level. Retry after **30 seconds** (up to `max_retries` from strategy frontmatter, default: 1).
 2. **Retry failure:** Log as CRITICAL. Nothing is published — feed simply has no new article for this tick. Next scheduled tick covers content since `last_generated` (unchanged), so no data is lost.
 
 Feed output and error logging are strictly separated — the feed only ever contains real digest articles, never error/status messages.
@@ -184,19 +209,19 @@ When set to 1, generations are queued and processed one at a time. Higher values
 ## Config
 
 ```toml
+[pail]
+default_strategy = "simple"           # or "agentic", "brief", or a user-defined strategy
+# strategies_dir = "./my-strategies"  # optional path to user-defined strategies
+
 [opencode]
 binary = "opencode"
 default_model = "opencode/big-pickle"
-timeout = "10m"
-max_retries = 1
-system_prompt = """..."""   # required, must contain {editorial_directive}
 
-[opencode.project_config]
-share = "auto"
-
-[opencode.project_config.agent.build]
-variant = "max"
+[[output_channel]]
+# strategy = "agentic"               # optional per-channel override
 ```
+
+Timeout, max_retries, system prompt, and opencode project config are all defined by the strategy. See [Generation Strategies spec](generation-strategies.md) and [Config spec](config.md).
 
 ## Decisions
 
@@ -247,3 +272,15 @@ variant = "max"
 - **LLM output sanitization:** replace/strip characters invalid in XML 1.0 before rendering.
   Options: sanitize in parse_output / sanitize in Atom serializer / patch quick-xml / switch to XML 1.1.
   Rationale: XML 1.0 (mandated by Atom RFC 4287) forbids C0 controls except \t, \n, \r — even as character references. Neither quick-xml nor atom_syndication sanitize these. XML 1.1 is dead and wouldn't help (only allows them as references, not directly). Sanitized in two places: parse_output (cleans on ingest) and build_atom_feed (safety net for articles already in DB from before the fix). Two tiers: Tier A replaces/strips invalid XML chars (U+0019→apostrophe observed in gpt-5-nano); Tier B maps C1 range (U+0080-U+009F) from Windows-1252 ghosts to correct Unicode (smart quotes, dashes, etc.). See `sanitize_xml_text()` in `generate.rs`.
+
+- **Context exhaustion fix:** custom `fetch-article` tool + researcher subagent.
+  Options: custom tool only / subagent only / both / reduce source count / switch to summarization API.
+  Rationale: the custom tool reduces per-article tokens from ~25K to ~3K by stripping boilerplate via Readability. The subagent isolates raw content from the parent context entirely — only compact briefs flow back. Together they reduce total context from 400-550K tokens to ~50-80K, making all models viable including those with 131K hard limits. No changes to the generation engine or opencode itself — the fix is entirely in the workspace files that pail generates.
+
+- **Custom tool embedding:** `include_str!` from `src/opencode_tools/`.
+  Options: embed via `include_str!` / write inline in Rust / ship as separate files.
+  Rationale: embedding keeps the tool source in version control as readable TypeScript while ensuring it's always available in the binary. No external file dependencies at runtime.
+
+- **Researcher subagent permissions:** deny all except read, glob, webfetch, websearch, fetch_article.
+  Options: allow all / deny all except needed / custom per-tool.
+  Rationale: minimal permissions prevent the researcher from writing files or using tools that could affect the workspace. It only needs to read source files, fetch articles, and search the web.

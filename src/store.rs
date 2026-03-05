@@ -357,8 +357,8 @@ pub async fn insert_generated_article(pool: &SqlitePool, article: &GeneratedArti
 
     sqlx::query(
         "INSERT INTO generated_articles (id, output_channel_id, generated_at, covers_from, covers_to,
-         title, topics, body_html, body_markdown, content_item_ids, generation_log, model_used, token_count)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         title, topics, body_html, body_markdown, content_item_ids, generation_log, model_used, token_count, strategy_used)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&article.id)
     .bind(&article.output_channel_id)
@@ -373,6 +373,7 @@ pub async fn insert_generated_article(pool: &SqlitePool, article: &GeneratedArti
     .bind(&article.generation_log)
     .bind(&article.model_used)
     .bind(article.token_count)
+    .bind(&article.strategy_used)
     .execute(pool)
     .await
     .context("inserting generated article")?;
@@ -449,7 +450,7 @@ pub async fn delete_old_content_items(pool: &SqlitePool, cutoff: DateTime<Utc>) 
 pub async fn get_recent_articles(pool: &SqlitePool, channel_id: &str, limit: i64) -> Result<Vec<GeneratedArticleRow>> {
     let articles = sqlx::query_as::<_, GeneratedArticleRow>(
         "SELECT id, output_channel_id, generated_at, covers_from, covers_to,
-         title, topics, body_html, body_markdown, content_item_ids, generation_log, model_used, token_count
+         title, topics, body_html, body_markdown, content_item_ids, generation_log, model_used, token_count, strategy_used
          FROM generated_articles
          WHERE output_channel_id = ?
          ORDER BY generated_at DESC
@@ -479,7 +480,7 @@ pub async fn get_all_enabled_channels(pool: &SqlitePool) -> Result<Vec<OutputCha
 pub async fn get_article_by_id(pool: &SqlitePool, article_id: &str) -> Result<Option<GeneratedArticleRow>> {
     let article = sqlx::query_as::<_, GeneratedArticleRow>(
         "SELECT id, output_channel_id, generated_at, covers_from, covers_to,
-         title, topics, body_html, body_markdown, content_item_ids, generation_log, model_used, token_count
+         title, topics, body_html, body_markdown, content_item_ids, generation_log, model_used, token_count, strategy_used
          FROM generated_articles WHERE id = ?",
     )
     .bind(article_id)

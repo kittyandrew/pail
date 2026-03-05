@@ -6,9 +6,10 @@ Launch an interactive opencode TUI session with collected source data available 
 
 ```bash
 pail interactive <slug> --since 1d
+pail interactive <slug> --since 1d --strategy agentic
 ```
 
-Same flags as `generate` for time window (`--since`, `--from`/`--to`). No `--output` flag — there's no article to write.
+Same flags as `generate` for time window (`--since`, `--from`/`--to`) and `--strategy` (override generation strategy). No `--output` flag — there's no article to write.
 
 ## Implementation
 
@@ -21,11 +22,13 @@ No article is parsed or stored. No `last_generated` update. This is purely explo
 
 ## Workspace Context
 
-The `## Workspace` section (describing `manifest.json`, `sources/`, file formats) is defined once in code (`generate::workspace_context()`) and used by both modes:
+The `## Workspace` section (describing `manifest.json`, `sources/`, tools, file formats) is defined once in code (`strategy::workspace_context()`) and used by both modes:
 - **Generate mode:** prepended to the rendered system prompt in `prompt.md` (includes `output.md` bullet)
 - **Interactive mode:** written as `AGENTS.md` in the workspace (omits `output.md` bullet)
 
-This replaced the previous approach where the workspace description was part of the `system_prompt` template in `config.toml`.
+The workspace context is dynamic — it lists available tools based on the active strategy's `tools` frontmatter, not hardcoded.
+
+Interactive mode respects the channel's configured strategy. The strategy's opencode.json overlay and tools are written to the workspace, so the TUI session has the same tool access as a batch generation would.
 
 ## Decisions
 
@@ -37,9 +40,9 @@ This replaced the previous approach where the workspace description was part of 
   Options: full editorial prompt / `AGENTS.md` context-only / no prompt at all.
   Rationale: the user is driving the session — they don't need article generation instructions. `AGENTS.md` is auto-discovered by opencode's TUI, giving the model workspace layout knowledge without a system prompt.
 
-- **Workspace context extraction:** defined once in code (`generate::workspace_context()`), used by both modes.
+- **Workspace context extraction:** defined once in code (`strategy::workspace_context()`), used by both modes.
   Options: keep in config template / extract to code / duplicate in both places.
-  Rationale: single source of truth. The config template's `system_prompt` no longer contains the workspace section — it's prepended by code at render time. Users with existing `config.toml` may have a duplicate `## Workspace` section (harmless but untidy — they can remove it manually).
+  Rationale: single source of truth. The strategy's `prompt.md` does not contain the workspace section — it's prepended by code at render time.
 
 - **No output.md in interactive workspace:** omitted since there's no generation target.
   Options: include empty output.md / omit it.
@@ -49,9 +52,9 @@ This replaced the previous approach where the workspace description was part of 
   Options: auto-cleanup on drop / persist for manual inspection / ask user.
   Rationale: consistent with generate mode. The user can copy files out during the TUI session if needed.
 
-- **opencode flags:** `--model <model>` passed, workspace path as positional `[project]` arg. `opencode.json` is written from `[opencode.project_config]` in `prepare_workspace()`, shared by both modes.
+- **opencode flags:** `--model <model>` passed, workspace path as positional `[project]` arg. `opencode.json` is merged from the global base + strategy overlay in `prepare_workspace()`, shared by both modes.
   Options: `--share` CLI flag / `opencode.json` project config / no sharing.
-  Rationale: `--share` is only available on `opencode run`, not TUI mode. `[opencode.project_config]` maps directly to opencode's `opencode.json` schema, giving consistent behavior across both generate and interactive modes without CLI-flag hacks.
+  Rationale: `--share` is only available on `opencode run`, not TUI mode. The merged `opencode.json` gives consistent behavior across both generate and interactive modes without CLI-flag hacks.
 
 - **No timeout or cancellation token:** the user controls the TUI session directly.
   Options: inherit generate's timeout / no timeout.

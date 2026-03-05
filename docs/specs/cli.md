@@ -25,9 +25,12 @@ pail generate <slug>
 pail generate <slug> --output ./article.md
 pail generate <slug> --since 7d
 pail generate <slug> --since 7d --output ./article.md
+pail generate <slug> --since 7d --strategy agentic
 pail generate <slug> --from 2026-02-14T20:00:00Z --to 2026-02-16T08:00:00Z
 pail generate <slug> --from ... --to ... --output ./article.md
 ```
+
+Flags: `--output` (write markdown to file), `--strategy` (override generation strategy, default: channel config → `[pail].default_strategy` → `"simple"`), `--since`/`--from`/`--to` (time window).
 
 **Self-contained one-shot pipeline:**
 1. Open/create the SQLite DB, sync config to DB
@@ -63,6 +66,46 @@ pail tg status
 ```
 
 Show Telegram session status.
+
+## benchmark run
+
+```bash
+pail benchmark run --since 7d
+pail benchmark run --from 2026-02-14T00:00:00Z --to 2026-02-21T00:00:00Z
+pail benchmark run --since 7d --samples 3 --channel tech-digest
+pail benchmark run --since 7d --models opencode/big-pickle,opencode/glm-5-free
+pail benchmark run --since 7d --strategy simple --models opencode/glm-5-free
+```
+
+Run all free opencode models (or a specified list) against the same workspace and collect article outputs for comparison. See [Agentic Benchmark spec](agentic-benchmark.md) for full details.
+
+Flags: `--since`/`--from`/`--to` (time window), `--channel` (output channel slug, default: first), `--strategy` (override generation strategy, default: channel's configured strategy), `--samples` (per model, default: 5), `--delay` (between samples, default: 5s), `--timeout` (per generation, default: 15m), `--models` (comma-separated, default: auto-discover `opencode/*`).
+
+Results are written to `benchmarks/results/<run-id>/`. Use the `/bench-judge` Claude Code skill to evaluate results.
+
+## strategy list
+
+```bash
+pail strategy list
+```
+
+List all available strategies (built-in + user-defined) with name, source, timeout, tool count, and description.
+
+## strategy show
+
+```bash
+pail strategy show <name>
+```
+
+Show a strategy's resolved config: merged opencode.json, prompt preview, tool list.
+
+## strategy validate
+
+```bash
+pail strategy validate <path>
+```
+
+Validate a user strategy directory (parse prompt.md, check frontmatter, verify tool references).
 
 ## daemon (default)
 

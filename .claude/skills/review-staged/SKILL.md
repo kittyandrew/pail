@@ -11,7 +11,7 @@ You are performing a thorough review of all uncommitted changes against the proj
 
 ## Setup
 
-1. **Load the full project spec** — follow the instructions in CLAUDE.md to locate and read the spec. This is non-negotiable before any review work.
+1. **Load the project docs** — read `docs/core.md` (architecture, data model) and `docs/README.md` (index of all specs). Then read each spec in `docs/specs/` that is relevant to the changed files. This is non-negotiable before any review work.
 2. **Gather the diff** — run `git diff` (unstaged) and `git diff --cached` (staged). Review ALL uncommitted changes together.
 3. **Identify changed files** — run `git status`. Read each modified file in full to understand context around the diff hunks.
 

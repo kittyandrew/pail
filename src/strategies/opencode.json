@@ -1,0 +1,8 @@
+{
+  "share": "auto",
+  "agent": {
+    "build": {
+      "variant": "high"
+    }
+  }
+}

@@ -20,6 +20,8 @@
 | [Docker](specs/docker.md) | Image build, compose, CI/CD |
 | [Interactive Mode](specs/interactive-mode.md) | opencode TUI session with collected source data |
 | [CLI Config Editor](specs/cli-config-editor.md) | Interactive TUI for managing Telegram sources in config |
+| [Agentic Benchmark](specs/agentic-benchmark.md) | Automated model evaluation: `pail benchmark run` + `/bench-judge` skill |
+| [Generation Strategies](specs/generation-strategies.md) | Switchable strategy bundles (prompt + opencode config + tools): simple, agentic, brief |
 
 ## Ideas (not yet implemented)
 

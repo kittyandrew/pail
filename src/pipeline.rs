@@ -10,6 +10,7 @@ use tracing::{error, info, warn};
 use grammers_client::Client;
 
 use crate::config::{Config, OutputChannelConfig};
+use crate::strategy::{self, StrategyRegistry};
 use crate::{fetch, fetch_tg, generate, models, store, telegram};
 
 /// How to determine the generation time window.
@@ -27,19 +28,19 @@ pub struct PipelineResult {
 }
 
 /// Shared pipeline context: everything needed after content fetching and item querying.
-struct PipelineContext {
-    channel: models::OutputChannel,
-    items: Vec<models::ContentItem>,
-    source_map: HashMap<String, models::Source>,
-    folder_channels: HashMap<String, HashMap<i64, (String, Option<String>)>>,
-    covers_from: DateTime<Utc>,
-    covers_to: DateTime<Utc>,
-    is_override: bool,
+pub(crate) struct PipelineContext {
+    pub(crate) channel: models::OutputChannel,
+    pub(crate) items: Vec<models::ContentItem>,
+    pub(crate) source_map: HashMap<String, models::Source>,
+    pub(crate) folder_channels: HashMap<String, HashMap<i64, (String, Option<String>)>>,
+    pub(crate) covers_from: DateTime<Utc>,
+    pub(crate) covers_to: DateTime<Utc>,
+    pub(crate) is_override: bool,
 }
 
 /// Shared setup: channel/source lookup, time window, content fetching, item querying.
 /// Returns None if no content items were found or if cancelled.
-async fn prepare_pipeline_context(
+pub(crate) async fn prepare_pipeline_context(
     pool: &SqlitePool,
     channel_config: &OutputChannelConfig,
     time_window: Option<TimeWindow>,
@@ -209,6 +210,8 @@ pub async fn run_generation(
     pool: &SqlitePool,
     config: &Config,
     channel_config: &OutputChannelConfig,
+    registry: &StrategyRegistry,
+    strategy_override: Option<&str>,
     time_window: Option<TimeWindow>,
     fetch_content: bool,
     tg_client: Option<&Client>,
@@ -224,11 +227,22 @@ pub async fn run_generation(
         return Ok(None);
     }
 
+    // Resolve strategy (CLI override takes precedence)
+    let strategy_name = strategy_override
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| strategy::resolve_strategy_name(config, channel_config));
+    let strategy = registry
+        .get(&strategy_name)
+        .ok_or_else(|| anyhow::anyhow!("strategy '{strategy_name}' not found in registry"))?;
+    let merged_opencode_config = strategy::resolve_opencode_config(strategy)?;
+
+    info!(strategy = %strategy_name, "using strategy for generation");
+
     // Build reference maps for generate_article (it expects &Source references)
     let source_ref_map: HashMap<String, &models::Source> = ctx.source_map.iter().map(|(k, v)| (k.clone(), v)).collect();
 
     // Generate with retry
-    let max_retries = config.opencode.max_retries;
+    let max_retries = strategy.meta.max_retries;
     let mut last_err = None;
     let mut result = None;
 
@@ -248,6 +262,8 @@ pub async fn run_generation(
         match generate::generate_article(
             config,
             channel_config,
+            strategy,
+            &merged_opencode_config,
             &ctx.channel,
             &ctx.items,
             &source_ref_map,
@@ -311,6 +327,8 @@ pub async fn run_interactive(
     pool: &SqlitePool,
     config: &Config,
     channel_config: &OutputChannelConfig,
+    registry: &StrategyRegistry,
+    strategy_override: Option<&str>,
     time_window: Option<TimeWindow>,
     tg_client: Option<&Client>,
     cancel: CancellationToken,
@@ -322,12 +340,23 @@ pub async fn run_interactive(
 
     let item_count = ctx.items.len();
 
+    // Resolve strategy (CLI override takes precedence)
+    let strategy_name = strategy_override
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| strategy::resolve_strategy_name(config, channel_config));
+    let strat = registry
+        .get(&strategy_name)
+        .ok_or_else(|| anyhow::anyhow!("strategy '{strategy_name}' not found in registry"))?;
+    let merged_opencode_config = strategy::resolve_opencode_config(strat)?;
+
     // Build reference maps for prepare_workspace
     let source_ref_map: HashMap<String, &models::Source> = ctx.source_map.iter().map(|(k, v)| (k.clone(), v)).collect();
 
     let ws = generate::prepare_workspace(
         config,
         channel_config,
+        strat,
+        &merged_opencode_config,
         &ctx.items,
         &source_ref_map,
         &ctx.folder_channels,
@@ -337,7 +366,7 @@ pub async fn run_interactive(
     .await
     .context("preparing interactive workspace")?;
 
-    generate::write_agents_md(ws.path())
+    generate::write_agents_md(ws.path(), strat)
         .await
         .context("writing AGENTS.md")?;
 

@@ -94,3 +94,4 @@ grammers-client = { git = "https://codeberg.org/Lonami/grammers", features = ["m
 grammers-mtsender = { git = "https://codeberg.org/Lonami/grammers" }
 grammers-session = { git = "https://codeberg.org/Lonami/grammers", default-features = false }
 grammers-tl-types = { git = "https://codeberg.org/Lonami/grammers" }
+serde_yml = "0.0.12"

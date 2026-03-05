@@ -1,3 +1,4 @@
+mod benchmark;
 mod cleanup;
 mod cli;
 mod config;
@@ -14,6 +15,7 @@ mod poller;
 mod scheduler;
 mod server;
 mod store;
+mod strategy;
 mod telegram;
 mod tg_listener;
 mod tg_session;
@@ -25,8 +27,9 @@ use sqlx::SqlitePool;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
-use crate::cli::{Cli, Commands, ConfigCommands, TgCommands};
+use crate::cli::{BenchmarkCommands, Cli, Commands, ConfigCommands, StrategyCommands, TgCommands};
 use crate::config::{Config, OutputChannelConfig, load_config, validate_config};
+use crate::strategy::StrategyRegistry;
 use crate::telegram::TgConnection;
 
 /// Shared CLI setup for commands that run a pipeline (Generate, Interactive).
@@ -38,35 +41,6 @@ struct CliPipelineSetup<'a> {
     tg_conn: Option<TgConnection>,
 }
 
-/// Parse --since/--from/--to into a TimeWindow.
-fn parse_time_window(
-    since: &Option<String>,
-    from: &Option<String>,
-    to: &Option<String>,
-) -> Result<Option<pipeline::TimeWindow>> {
-    if let Some(since_str) = since {
-        let duration =
-            humantime::parse_duration(since_str).with_context(|| format!("invalid --since duration: '{since_str}'"))?;
-        Ok(Some(pipeline::TimeWindow::Since(duration)))
-    } else if let (Some(from_str), Some(to_str)) = (from, to) {
-        let from_dt = chrono::DateTime::parse_from_rfc3339(from_str)
-            .with_context(|| format!("invalid --from timestamp: '{from_str}' (expected RFC 3339)"))?
-            .to_utc();
-        let to_dt = chrono::DateTime::parse_from_rfc3339(to_str)
-            .with_context(|| format!("invalid --to timestamp: '{to_str}' (expected RFC 3339)"))?
-            .to_utc();
-        if from_dt >= to_dt {
-            anyhow::bail!("--from must be before --to");
-        }
-        Ok(Some(pipeline::TimeWindow::Explicit {
-            from: from_dt,
-            to: to_dt,
-        }))
-    } else {
-        Ok(None)
-    }
-}
-
 /// Set up DB, config sync, channel lookup, cancellation, and TG connection.
 async fn setup_pipeline<'a>(
     config: &'a Config,
@@ -75,7 +49,7 @@ async fn setup_pipeline<'a>(
     from: &Option<String>,
     to: &Option<String>,
 ) -> Result<CliPipelineSetup<'a>> {
-    let time_window = parse_time_window(since, from, to)?;
+    let time_window = cli::parse_time_window(since, from, to)?;
 
     let pool = db::create_pool(config).await.context("creating database")?;
     info!(db_path = %config.db_path().display(), "database ready");
@@ -162,6 +136,11 @@ async fn main() -> Result<()> {
     validate_config(&config).context("config validation failed")?;
     info!("config validated successfully");
 
+    // Load strategy registry (built-in + user-defined strategies)
+    let registry = StrategyRegistry::load(config.pail.strategies_dir.as_deref()).context("loading strategy registry")?;
+    strategy::validate_strategy_config(&config, &registry).context("strategy validation failed")?;
+    info!("strategy registry loaded");
+
     match cli.command {
         Some(Commands::Config { command }) => match command {
             ConfigCommands::Validate => {
@@ -205,6 +184,7 @@ async fn main() -> Result<()> {
         Some(Commands::Generate {
             slug,
             output,
+            strategy,
             since,
             from,
             to,
@@ -216,6 +196,8 @@ async fn main() -> Result<()> {
                 &setup.pool,
                 &config,
                 setup.channel_config,
+                &registry,
+                strategy.as_deref(),
                 setup.time_window,
                 true,
                 tg_client_ref,
@@ -245,7 +227,13 @@ async fn main() -> Result<()> {
                 conn.runner_handle.abort();
             }
         }
-        Some(Commands::Interactive { slug, since, from, to }) => {
+        Some(Commands::Interactive {
+            slug,
+            strategy,
+            since,
+            from,
+            to,
+        }) => {
             let setup = setup_pipeline(&config, &slug, &since, &from, &to).await?;
             let tg_client_ref = setup.tg_conn.as_ref().map(|c| &c.client);
 
@@ -253,6 +241,8 @@ async fn main() -> Result<()> {
                 &setup.pool,
                 &config,
                 setup.channel_config,
+                &registry,
+                strategy.as_deref(),
                 setup.time_window,
                 tg_client_ref,
                 setup.cancel,
@@ -274,6 +264,103 @@ async fn main() -> Result<()> {
                 conn.runner_handle.abort();
             }
         }
+        Some(Commands::Benchmark { command }) => match command {
+            BenchmarkCommands::Run {
+                since,
+                from,
+                to,
+                channel,
+                strategy,
+                samples,
+                delay,
+                timeout,
+                models,
+            } => {
+                benchmark::run_benchmark(
+                    &config,
+                    &registry,
+                    benchmark::BenchmarkRunArgs {
+                        since,
+                        from,
+                        to,
+                        channel,
+                        strategy,
+                        samples,
+                        delay,
+                        timeout,
+                        models,
+                    },
+                )
+                .await?;
+            }
+        },
+        Some(Commands::Strategy { command }) => match command {
+            StrategyCommands::List => {
+                let strategies = registry.list();
+                println!(
+                    "{:<12} {:<8} {:<8} {:<6} DESCRIPTION",
+                    "NAME", "SOURCE", "TIMEOUT", "TOOLS"
+                );
+                for s in &strategies {
+                    let source = match s.source {
+                        strategy::StrategySource::BuiltIn => "built-in",
+                        strategy::StrategySource::User => "user",
+                    };
+                    let tool_count = s.meta.tools.len();
+                    println!(
+                        "{:<12} {:<8} {:<8} {:<6} {}",
+                        s.meta.name, source, s.meta.timeout, tool_count, s.meta.description
+                    );
+                }
+            }
+            StrategyCommands::Show { name } => {
+                let strat = registry
+                    .get(&name)
+                    .ok_or_else(|| anyhow::anyhow!("strategy '{name}' not found"))?;
+                let merged = strategy::resolve_opencode_config(strat)?;
+
+                println!("Strategy: {}", strat.meta.name);
+                println!("Description: {}", strat.meta.description);
+                println!(
+                    "Source: {}",
+                    match strat.source {
+                        strategy::StrategySource::BuiltIn => "built-in",
+                        strategy::StrategySource::User => "user",
+                    }
+                );
+                println!("Timeout: {}", strat.meta.timeout);
+                println!("Max retries: {}", strat.meta.max_retries);
+                println!(
+                    "Tools: {}",
+                    if strat.meta.tools.is_empty() {
+                        "(none)".to_string()
+                    } else {
+                        strat.meta.tools.join(", ")
+                    }
+                );
+                println!("\n--- Merged opencode.json ---");
+                println!("{}", serde_json::to_string_pretty(&merged)?);
+                println!("\n--- Prompt preview (first 20 lines) ---");
+                for line in strat.prompt_body.lines().take(20) {
+                    println!("{line}");
+                }
+                if strat.prompt_body.lines().count() > 20 {
+                    println!("... ({} more lines)", strat.prompt_body.lines().count() - 20);
+                }
+            }
+            StrategyCommands::Validate { path } => match strategy::load_user_strategy(&path) {
+                Ok(s) => {
+                    println!("Strategy '{}' is valid.", s.meta.name);
+                    println!("Description: {}", s.meta.description);
+                    println!("Timeout: {}", s.meta.timeout);
+                    println!("Tools: {:?}", s.meta.tools);
+                }
+                Err(e) => {
+                    eprintln!("Validation failed: {e:#}");
+                    std::process::exit(1);
+                }
+            },
+        },
         Some(Commands::Tg { command }) => {
             // Validate telegram config
             match config.telegram.api_id {
@@ -312,7 +399,7 @@ async fn main() -> Result<()> {
             conn.runner_handle.abort();
         }
         None => {
-            daemon::run(config).await?;
+            daemon::run(config, registry).await?;
         }
     }
 
