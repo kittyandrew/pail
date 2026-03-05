@@ -61,6 +61,19 @@ Every spec file (`docs/specs/`) and idea file (`docs/ideas/`) must have a `## De
 
 When reviewing code or auditing the project, **verify claims before reporting them.** Don't assume something is missing based on indirect evidence (e.g., git status snapshots). Check the filesystem directly — glob for files, read them, confirm they exist or don't — before listing an issue.
 
+<!-- sentry-verified -->
+## Observability
+
+This project reports errors, traces, and breadcrumbs to Sentry via `SENTRY_DSN`. See `docs/observability.md` for details.
+
+**Conventions:**
+- All HTTP endpoints are wrapped in Sentry transactions via `sentry-tower` layers
+- `tracing` events are auto-captured as breadcrumbs (info/warn) or Sentry events (error)
+- Errors propagate to Sentry — don't silently catch and discard errors
+- New features must log key operations via `tracing` (which flows into Sentry automatically)
+
+**Environment:** `SENTRY_DSN` must be set to enable reporting. Without it, Sentry is a no-op. `.env` has `SENTRY_ENVIRONMENT=development` for local dev.
+
 ## Code Style
 
 - **No imports inside functions or mid-file.** All `use` statements go at the top of the file.

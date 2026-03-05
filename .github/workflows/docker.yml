@@ -15,7 +15,10 @@ jobs:
       - uses: DeterminateSystems/magic-nix-cache-action@v8
 
       - name: Build Docker image
-        run: nix build .#docker
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          GIT_SHA: ${{ github.sha }}
+        run: nix build .#docker --impure
 
       - name: Load image
         run: docker load < result

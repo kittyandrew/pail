@@ -5,6 +5,7 @@
 ## Architecture
 
 - [Core](core.md) — overview, data model, architecture, technical decisions
+- [Observability](observability.md) — Sentry integration, error tracking, performance monitoring
 
 ## Specs (implemented)
 

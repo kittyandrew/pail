@@ -26,6 +26,7 @@ use clap::Parser;
 use sqlx::SqlitePool;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
+use tracing_subscriber::prelude::*;
 
 use crate::cli::{BenchmarkCommands, Cli, Commands, ConfigCommands, StrategyCommands, TgCommands};
 use crate::config::{Config, OutputChannelConfig, load_config, validate_config};
@@ -126,10 +127,29 @@ async fn main() -> Result<()> {
 
     let config = load_config(&cli.config).with_context(|| format!("loading config from {}", cli.config.display()))?;
 
-    // Initialize tracing
+    // Initialize Sentry (must happen before tracing subscriber)
+    let _sentry_guard = sentry::init((
+        std::env::var("SENTRY_DSN").ok(),
+        sentry::ClientOptions {
+            traces_sample_rate: 1.0,
+            environment: Some(
+                std::env::var("SENTRY_ENVIRONMENT")
+                    .unwrap_or_else(|_| "development".to_string())
+                    .into(),
+            ),
+            release: std::env::var("GIT_SHA").ok().map(Into::into),
+            ..Default::default()
+        },
+    ));
+
+    // Initialize tracing with sentry layer
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&config.pail.log_level));
-    tracing_subscriber::fmt().with_env_filter(filter).init();
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(tracing_subscriber::fmt::layer())
+        .with(sentry::integrations::tracing::layer())
+        .init();
 
     info!(config_path = %cli.config.display(), "config loaded");
 

@@ -14,6 +14,9 @@ services:
       - opencode-config:/home/pail/.config/opencode
     environment:
       - PAIL_DATA_DIR=/var/lib/pail
+      # Sentry is baked into the Docker image. Override here if needed:
+      # - SENTRY_DSN=${SENTRY_DSN}
+      # - SENTRY_ENVIRONMENT=production
       # Option A: pass API keys as env vars (no opencode auth needed)
       # - OPENAI_API_KEY=${OPENAI_API_KEY}
       # - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}

@@ -1,6 +1,7 @@
 /target
 /data
 config.toml
+.env
 *.swp
 *.swo
 .direnv/

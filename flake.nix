@@ -62,10 +62,27 @@
           config = {
             Entrypoint = ["${pkgs.tini}/bin/tini" "--" "${pail}/bin/pail" "--config" "/etc/pail/config.toml"];
             User = "${uid}:${gid}";
-            Env = [
-              "HOME=/home/pail"
-              "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
-            ];
+            # @NOTE: SENTRY_DSN and GIT_SHA use builtins.getEnv — requires `--impure` flag.
+            # CI sets these from secrets/context; local builds without --impure get empty
+            # strings (Sentry becomes a no-op, release is unset). See docs/observability.md.
+            Env =
+              [
+                "HOME=/home/pail"
+                "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
+                "SENTRY_ENVIRONMENT=production"
+              ]
+              ++ (let
+                dsn = builtins.getEnv "SENTRY_DSN";
+              in
+                if dsn != ""
+                then ["SENTRY_DSN=${dsn}"]
+                else [])
+              ++ (let
+                sha = builtins.getEnv "GIT_SHA";
+              in
+                if sha != ""
+                then ["GIT_SHA=${sha}"]
+                else []);
             ExposedPorts = {"8080/tcp" = {};};
           };
         };
