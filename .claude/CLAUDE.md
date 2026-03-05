@@ -74,6 +74,22 @@ This project reports errors, traces, and breadcrumbs to Sentry via `SENTRY_DSN`.
 
 **Environment:** `SENTRY_DSN` must be set to enable reporting. Without it, Sentry is a no-op. `.env` has `SENTRY_ENVIRONMENT=development` for local dev.
 
+## Release Build Validation
+
+When changes touch anything that could affect the runtime build — dependencies, build config
+(`flake.nix`, `Cargo.toml`), system library usage, or deployment files (`docker-compose.yml`,
+CI workflows) — **build and smoke-test the release artifact before committing:**
+
+```bash
+nix build .#docker && docker load < result && docker run --rm pail:0.1.0 --help
+```
+
+If the image fails to start, the change has introduced a runtime dependency that isn't in the
+image. Fix it before committing — CI is a safety net, not the primary check.
+
+This does NOT apply to code-only changes (`.rs`, `.md`, config files) that don't alter
+dependencies or build plumbing.
+
 ## Code Style
 
 - **No imports inside functions or mid-file.** All `use` statements go at the top of the file.
