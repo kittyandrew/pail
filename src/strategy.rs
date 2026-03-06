@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use gray_matter::Matter;
+use gray_matter::engine::YAML;
 use serde::Deserialize;
 use serde_json::Value;
 use tracing::warn;
@@ -161,30 +163,30 @@ impl std::fmt::Display for StrategySource {
 
 /// Parse a strategy prompt.md file into frontmatter and body.
 fn parse_strategy_prompt(content: &str) -> Result<(StrategyFrontmatter, String)> {
-    // Expect YAML frontmatter delimited by ---
-    let trimmed = content.trim_start();
-    if !trimmed.starts_with("---") {
+    let matter = Matter::<YAML>::new();
+
+    // Try typed deserialization first (happy path)
+    if let Some(result) = matter.parse_with_struct::<StrategyFrontmatter>(content) {
+        if result.data.format_version != 1 {
+            anyhow::bail!(
+                "unsupported strategy format_version {} (this binary supports version 1)",
+                result.data.format_version
+            );
+        }
+        return Ok((result.data, result.content));
+    }
+
+    // Typed parse failed — diagnose why for a useful error message
+    let parsed = matter.parse(content);
+    if parsed.data.is_none() {
         anyhow::bail!("strategy prompt.md must start with YAML frontmatter (---)");
     }
 
-    let after_first = &trimmed[3..];
-    let end_pos = after_first
-        .find("\n---")
-        .ok_or_else(|| anyhow::anyhow!("no closing --- found in strategy prompt.md frontmatter"))?;
-
-    let yaml_str = &after_first[..end_pos];
-    let body = after_first[end_pos + 4..].trim_start_matches('\n').to_string();
-
-    let meta: StrategyFrontmatter = serde_yml::from_str(yaml_str).context("parsing strategy frontmatter YAML")?;
-
-    if meta.format_version != 1 {
-        anyhow::bail!(
-            "unsupported strategy format_version {} (this binary supports version 1)",
-            meta.format_version
-        );
-    }
-
-    Ok((meta, body))
+    // Frontmatter exists but doesn't match StrategyFrontmatter
+    anyhow::bail!(
+        "strategy frontmatter is valid YAML but doesn't match the expected schema \
+         (required fields: format_version, name, description)"
+    );
 }
 
 /// Load a built-in strategy from embedded strings.

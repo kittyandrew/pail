@@ -261,9 +261,9 @@ Timeout, max_retries, system prompt, and opencode project config are all defined
   Options: YAML frontmatter + markdown / JSON / plain markdown with convention-based parsing.
   Rationale: markdown body is natural for the AI to write and iterate on. YAML frontmatter gives pail structured metadata (title, topics) without complex parsing.
 
-- **YAML frontmatter parsing library:** `gray_matter` or `serde_yaml_ng`.
-  Options: `gray_matter` / `serde_yaml_ng` / `serde_yaml` / `serde_yml`.
-  Rationale: `serde_yaml` is deprecated (archived Mar 2024). `serde_yml` is unsound ([RUSTSEC-2025-0068](https://rustsec.org/advisories/RUSTSEC-2025-0068.html)).
+- **YAML frontmatter parsing library:** `gray_matter` (uses `yaml-rust2`, pure Rust).
+  Options: `gray_matter` (already a dep, pure Rust via yaml-rust2) / `serde_yaml_ng` (drop-in, but uses unmaintained unsafe-libyaml) / `serde_norway` (maintained libyaml fork, new dep) / `serde-saphyr` (pure Rust, pre-1.0, heavy deps).
+  Rationale: `gray_matter` was already in the dependency tree for output parsing. Reusing it for strategy frontmatter removes `serde_yml` (unsound, [RUSTSEC-2025-0068](https://rustsec.org/advisories/RUSTSEC-2025-0068.html)) and its `libyml` dep entirely — zero new dependencies. The underlying `yaml-rust2` parser is pure Rust, actively maintained, and has 28M+ downloads. `serde_yaml` is deprecated (archived Mar 2024).
 
 - **Failure handling:** retry once after 30s, then log CRITICAL and skip.
   Options: no retry / retry once / retry with exponential backoff / retry indefinitely.

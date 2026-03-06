@@ -253,7 +253,7 @@ generated_article {
 | Feed output | Atom 1.0 ([RFC 4287](https://www.rfc-editor.org/rfc/rfc4287)) | Strictly specified, universal reader support. Additional formats deferred. |
 | Markdown to HTML | [pulldown-cmark](https://github.com/pulldown-cmark/pulldown-cmark) | Standard Rust markdown parser |
 | Serialization | serde + toml + serde_json | Standard Rust serialization |
-| YAML frontmatter | [`gray_matter`](https://lib.rs/crates/gray_matter) | `serde_yaml` is deprecated. **Avoid `serde_yml`** ([RUSTSEC-2025-0068](https://rustsec.org/advisories/RUSTSEC-2025-0068.html)). |
+| YAML frontmatter | [`gray_matter`](https://lib.rs/crates/gray_matter) (uses `yaml-rust2`) | Pure Rust. Used for both output parsing and strategy frontmatter. `serde_yaml` is deprecated; `serde_yml` is unsound ([RUSTSEC-2025-0068](https://rustsec.org/advisories/RUSTSEC-2025-0068.html)). |
 | DB migrations | Custom runner (`include_str!` + sqlx) | Embedded migrations compiled into the binary, run on startup. See Decisions below. |
 
 ---
