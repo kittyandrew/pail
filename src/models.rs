@@ -1,3 +1,8 @@
+// @NOTE: sqlx's FromRow populates every field from the query result, so fields
+// that aren't read by hand-written Rust code still aren't dead — they're used
+// by the derive macro at compile time.
+#![allow(dead_code)]
+
 use chrono::{DateTime, Utc};
 use sqlx::FromRow;
 

@@ -302,7 +302,9 @@ pub async fn scheduler_loop(
                         debug!(channel = %channel_config.name, "scheduled generation skipped (no content)");
                     }
                     Err(e) => {
-                        error!(channel = %channel_config.name, error = %e, "scheduled generation failed");
+                        // Use {:#} to include the full anyhow error chain in the
+                        // Sentry event message (Display only shows the outermost).
+                        error!(channel = %channel_config.name, "scheduled generation failed: {e:#}");
                     }
                 }
             });

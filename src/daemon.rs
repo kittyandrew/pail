@@ -11,9 +11,15 @@ use rand::distr::Alphanumeric;
 
 use crate::config::Config;
 use crate::strategy::StrategyRegistry;
-use crate::{cleanup, db, poller, scheduler, server, store, telegram, tg_listener};
+use crate::{cleanup, db, generate, poller, scheduler, server, store, telegram, tg_listener};
 
 pub async fn run(config: Config, registry: StrategyRegistry) -> Result<()> {
+    // Validate models early so provider auth issues surface at boot, not at first
+    // scheduled generation (which would silently fail and produce Sentry noise).
+    generate::validate_models(&config)
+        .await
+        .context("model validation failed")?;
+
     let pool = db::create_pool(&config).await.context("creating database")?;
     info!(db_path = %config.db_path().display(), "database ready");
 

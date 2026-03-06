@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use gray_matter::Matter;
 use gray_matter::engine::YAML;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use tokio::io::AsyncReadExt;
@@ -339,7 +339,10 @@ pub async fn generate_article(
         .map_err(GenerationError::Workspace)?;
 
     if output_content.trim().is_empty() {
-        error!(
+        // @NOTE: warn (not error) so Sentry captures this as a breadcrumb, not a
+        // separate event.  The actual error propagates up to the scheduler which
+        // logs the single Sentry event with the full chain.
+        warn!(
             generation_log = %generation_log,
             "output.md is empty — opencode log above may indicate the cause"
         );
@@ -851,6 +854,27 @@ fn markdown_to_html(markdown: &str) -> String {
     html
 }
 
+/// Strip ANSI escape sequences (e.g. `\x1b[94m`) from a string.
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            // Consume CSI sequence: ESC [ ... (terminator is a letter)
+            if chars.next() == Some('[') {
+                for c2 in chars.by_ref() {
+                    if c2.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 fn slug_from_name(name: &str) -> String {
     name.to_lowercase()
         .chars()
@@ -860,4 +884,68 @@ fn slug_from_name(name: &str) -> String {
         .filter(|s| !s.is_empty())
         .collect::<Vec<_>>()
         .join("-")
+}
+
+/// Validate that all models referenced in config are available in opencode.
+///
+/// Runs `opencode models` and checks the output against every model configured
+/// in output channels (explicit or resolved via default_model / fallback).
+/// `opencode models` only lists models whose provider is authenticated, so a
+/// missing model typically means the provider isn't logged in.
+pub async fn validate_models(config: &Config) -> Result<()> {
+    let binary = &config.opencode.binary;
+
+    let output = tokio::process::Command::new(binary)
+        .arg("models")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .await
+        .with_context(|| format!("running '{binary} models' — is opencode installed?"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("'{binary} models' exited with {}: {stderr}", output.status);
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let available: HashSet<String> = stdout
+        .lines()
+        .map(|l| strip_ansi(l).trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect();
+
+    // Collect all effective models from config (deduplicated)
+    let mut models_to_check: HashMap<String, Vec<String>> = HashMap::new(); // model -> channel names
+    for channel in &config.output_channel {
+        let model = channel
+            .model
+            .as_deref()
+            .or(config.opencode.default_model.as_deref())
+            .unwrap_or("opencode/big-pickle")
+            .to_string();
+        models_to_check.entry(model).or_default().push(channel.name.clone());
+    }
+
+    let mut missing = Vec::new();
+    for (model, channels) in &models_to_check {
+        if !available.contains(model) {
+            let provider = model.split('/').next().unwrap_or("unknown");
+            missing.push(format!(
+                "model '{model}' (used by: {}) — is the '{provider}' provider authenticated?",
+                channels.join(", ")
+            ));
+        }
+    }
+
+    if !missing.is_empty() {
+        anyhow::bail!(
+            "configured model(s) not available in opencode:\n  - {}\n\
+             Hint: run `opencode auth login <provider>` or check ANTHROPIC_API_KEY / OPENAI_API_KEY env vars",
+            missing.join("\n  - ")
+        );
+    }
+
+    info!(models = ?models_to_check.keys().collect::<Vec<_>>(), "all configured models available");
+    Ok(())
 }

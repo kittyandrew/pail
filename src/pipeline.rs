@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use sqlx::SqlitePool;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 use grammers_client::Client;
 
@@ -206,6 +206,7 @@ pub(crate) async fn prepare_pipeline_context(
 /// If false, assumes the poller/listener has already fetched content (daemon mode).
 ///
 /// Returns `None` if no content items were found (generation skipped).
+#[allow(clippy::too_many_arguments)]
 pub async fn run_generation(
     pool: &SqlitePool,
     config: &Config,
@@ -279,7 +280,9 @@ pub async fn run_generation(
                 break;
             }
             Err(e) => {
-                error!(attempt, error = %e, "generation failed");
+                // @NOTE: warn (not error) — per-attempt failures are intermediate.
+                // The final error is reported once by the caller (scheduler/CLI).
+                warn!(attempt, error = %e, "generation attempt failed");
                 last_err = Some(e);
             }
         }
@@ -323,6 +326,7 @@ pub async fn run_generation(
 /// No article is parsed or stored. No `last_generated` update.
 ///
 /// Returns the number of content items in the workspace, or None if no items found.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_interactive(
     pool: &SqlitePool,
     config: &Config,

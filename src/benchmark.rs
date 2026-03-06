@@ -38,9 +38,7 @@ struct SampleMeta {
 }
 
 struct SampleResult {
-    sample: usize,
     duration: Duration,
-    exit_code: Option<i32>,
     success: bool,
     has_output: bool,
 }
@@ -254,9 +252,7 @@ async fn run_model_samples(
             Err(e) => {
                 warn!(model = %model, sample = sample_num, error = %e, "failed to create temp dir");
                 results.push(SampleResult {
-                    sample: sample_num,
                     duration: Duration::ZERO,
-                    exit_code: None,
                     success: false,
                     has_output: false,
                 });
@@ -267,9 +263,7 @@ async fn run_model_samples(
         if let Err(e) = copy_dir_recursive(workspace_dir, tmp.path()) {
             warn!(model = %model, sample = sample_num, error = %e, "failed to copy workspace");
             results.push(SampleResult {
-                sample: sample_num,
                 duration: Duration::ZERO,
-                exit_code: None,
                 success: false,
                 has_output: false,
             });
@@ -350,9 +344,7 @@ async fn run_model_samples(
         );
 
         results.push(SampleResult {
-            sample: sample_num,
             duration,
-            exit_code,
             success,
             has_output,
         });

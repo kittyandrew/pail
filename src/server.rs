@@ -24,7 +24,7 @@ pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/feed/{*path}", get(feed_handler))
         .route("/article/{id}", get(article_handler))
-        .layer(sentry_tower::SentryHttpLayer::with_transaction())
+        .layer(sentry_tower::SentryHttpLayer::new().enable_transaction())
         .layer(sentry_tower::NewSentryLayer::<axum::extract::Request>::new_from_top())
         .with_state(state)
 }

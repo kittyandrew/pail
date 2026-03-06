@@ -181,12 +181,20 @@ The `opencode.json` workspace config is produced by deep-merging a compiled-in g
 
 When generation fails (opencode timeout, API error, malformed output):
 
-1. **First failure:** Log the full error at ERROR level. Retry after **30 seconds** (up to `max_retries` from strategy frontmatter, default: 1).
-2. **Retry failure:** Log as CRITICAL. Nothing is published — feed simply has no new article for this tick. Next scheduled tick covers content since `last_generated` (unchanged), so no data is lost.
+1. **Per-attempt failures:** Logged at WARN level (captured as Sentry breadcrumbs). Retry after **30 seconds** (up to `max_retries` from strategy frontmatter, default: 1).
+2. **Final failure (all retries exhausted):** The scheduler logs a single ERROR with the full anyhow error chain (`{e:#}` format). This produces **one** Sentry event per failed generation, with the root cause visible in the message.
+
+Intermediate errors (e.g., "output.md is empty") are logged at WARN so they appear as breadcrumbs attached to the final Sentry event, not as separate issues. The `generation_log` (opencode's stdout/stderr) is included in the warn-level breadcrumb for diagnostics.
 
 Feed output and error logging are strictly separated — the feed only ever contains real digest articles, never error/status messages.
 
-Generation logs from successful generations are stored in `generated_article.generation_log`. Failed generation logs are only emitted to stdout/stderr at ERROR level.
+Generation logs from successful generations are stored in `generated_article.generation_log`. Failed generation logs are emitted at WARN level and flow into Sentry as breadcrumbs.
+
+## Model Validation
+
+On daemon startup (before the scheduler begins), pail runs `opencode models` and verifies that every model referenced in config is available. `opencode models` only lists models whose **provider is authenticated** — a missing model typically means the provider isn't logged in (e.g., `ANTHROPIC_API_KEY` not set, or `opencode auth login anthropic` not run).
+
+If any configured model is unavailable, the daemon refuses to start with an actionable error message naming the missing model(s) and affected channels. This catches provider auth issues at deploy time instead of at the first scheduled generation.
 
 ## Empty Digest Handling
 

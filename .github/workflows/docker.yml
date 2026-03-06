@@ -1,14 +1,38 @@
 name: Docker
 
 on:
-  push:
+  # Run after both CI and Generate Article complete on main
+  workflow_run:
+    workflows: ["CI", "Generate Article"]
+    types: [completed]
     branches: [main]
 
 jobs:
   docker:
     runs-on: ubuntu-latest
+    # Only build+push if the triggering workflow succeeded AND we haven't
+    # already seen a failure from the other workflow in this commit.
+    # workflow_run fires once per completed workflow, so we check both.
+    if: github.event.workflow_run.conclusion == 'success'
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      # Verify the OTHER workflow also passed for this same commit
+      - name: Check all required workflows passed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SHA="${{ github.event.workflow_run.head_sha }}"
+          for WORKFLOW in "CI" "Generate Article"; do
+            STATUS=$(gh run list --workflow "$WORKFLOW" --commit "$SHA" --json conclusion --jq '.[0].conclusion')
+            if [ "$STATUS" != "success" ]; then
+              echo "Workflow '$WORKFLOW' has not succeeded for $SHA (status: $STATUS) — skipping Docker build"
+              exit 1
+            fi
+          done
+          echo "All required workflows passed for $SHA"
 
       - uses: cachix/install-nix-action@v30
 
@@ -17,7 +41,7 @@ jobs:
       - name: Build Docker image
         env:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-          GIT_SHA: ${{ github.sha }}
+          GIT_SHA: ${{ github.event.workflow_run.head_sha }}
         run: nix build .#docker --impure
 
       - name: Load image
