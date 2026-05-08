@@ -82,7 +82,7 @@ inquire = "0.9"
 toml_edit = "0.22"
 
 # Secure password input (no terminal echo)
-rpassword = "5"
+rpassword = "7"
 
 # Futures (needed for BoxFuture in grammers Session trait impl)
 futures-core = "0.3"
