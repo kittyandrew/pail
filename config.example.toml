@@ -55,7 +55,7 @@ version = 1
 
 # Default LLM model for generation (used when output_channel doesn't specify one)
 # See your opencode provider for available models.
-default_model = "opencode/big-pickle"
+default_model = "opencode/ling-3.0-flash-fin-free"
 
 [telegram]
 # Global toggle for Telegram integration
