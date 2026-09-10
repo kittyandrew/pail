@@ -1,17 +1,13 @@
 use atom_syndication::{Category, Content, Entry, Feed, Generator, Link, Person, Text};
-use axum::Router;
-use axum::extract::{Path, Query, State};
-use axum::http::{HeaderMap, StatusCode, header};
-use axum::response::{Html, IntoResponse, Response};
-use axum::routing::get;
+use axum::{Router, extract::Path, extract::Query, extract::State, http::HeaderMap, http::StatusCode, http::header};
+use axum::{response::Html, response::IntoResponse, response::Response, routing::get};
 use base64::Engine;
 use chrono::FixedOffset;
 use sqlx::SqlitePool;
 use subtle::ConstantTimeEq;
 use tracing::{debug, warn};
 
-use crate::generate::sanitize_xml_text;
-use crate::store;
+use crate::{generate::sanitize_xml_text, store};
 
 #[derive(Clone)]
 pub struct AppState {

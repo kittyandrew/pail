@@ -1,5 +1,4 @@
-use std::collections::HashMap;
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
@@ -10,8 +9,7 @@ use tracing::{info, warn};
 use grammers_client::Client;
 
 use crate::config::{Config, OutputChannelConfig};
-use crate::strategy::{self, StrategyRegistry};
-use crate::{fetch, fetch_tg, generate, models, store, telegram};
+use crate::{fetch, fetch_tg, generate, models, store, strategy, strategy::StrategyRegistry, telegram};
 
 /// How to determine the generation time window.
 pub enum TimeWindow {

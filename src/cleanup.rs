@@ -5,8 +5,7 @@ use sqlx::SqlitePool;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
-use crate::config::Config;
-use crate::store;
+use crate::{config::Config, store};
 
 /// Content retention cleanup loop. Wakes every hour.
 pub async fn cleanup_loop(pool: SqlitePool, config: Arc<Config>, cancel: CancellationToken) {

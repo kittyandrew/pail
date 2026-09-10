@@ -1,6 +1,4 @@
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::{collections::HashMap, path::Path, path::PathBuf, time::Duration, time::Instant};
 
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -8,9 +6,7 @@ use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
-use crate::config::Config;
-use crate::strategy::{self, StrategyRegistry};
-use crate::{cli, db, generate, pipeline, store};
+use crate::{cli, config::Config, db, generate, pipeline, store, strategy, strategy::StrategyRegistry};
 
 /// Arguments parsed from `pail benchmark run`.
 pub struct BenchmarkRunArgs {

@@ -1,5 +1,4 @@
-use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::{collections::HashMap, collections::HashSet, path::Path};
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
@@ -9,10 +8,8 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use crate::config::{Config, OutputChannelConfig};
-use crate::error::GenerationError;
-use crate::models::{ContentItem, GeneratedArticle, OutputChannel, Source};
-use crate::strategy::{self, Strategy};
+use crate::{config::Config, config::OutputChannelConfig, error::GenerationError};
+use crate::{models::ContentItem, models::GeneratedArticle, models::OutputChannel, models::Source, strategy, strategy::Strategy};
 
 #[cfg(all(test, unix))]
 mod tests;

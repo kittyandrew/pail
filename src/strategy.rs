@@ -1,15 +1,12 @@
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::{collections::HashMap, path::Path, path::PathBuf};
 
 use anyhow::{Context, Result};
-use gray_matter::Matter;
-use gray_matter::engine::YAML;
+use gray_matter::{Matter, engine::YAML};
 use serde::Deserialize;
 use serde_json::Value;
 use tracing::warn;
 
-use crate::config::{Config, OutputChannelConfig};
-use crate::error::ConfigError;
+use crate::{config::Config, config::OutputChannelConfig, error::ConfigError};
 
 // ── Embedded strategy files ────────────────────────────────────────────
 

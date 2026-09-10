@@ -6,8 +6,7 @@ use sha2::{Digest, Sha256};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use crate::error::FetchError;
-use crate::models::{ContentItem, Source};
+use crate::{error::FetchError, models::ContentItem, models::Source};
 
 /// Result of an RSS fetch, including items and HTTP cache headers.
 pub struct FetchResult {

@@ -1,23 +1,16 @@
-use std::collections::HashMap;
-use std::io::Write;
-use std::sync::Arc;
+use std::{collections::HashMap, io::Write, sync::Arc};
 
 use anyhow::{Context, Result};
-use grammers_client::peer::Peer as ClientPeer;
-use grammers_client::{Client, SenderPool, SignInError};
+use grammers_client::{Client, SenderPool, SignInError, peer::Peer as ClientPeer};
 use grammers_mtsender::ConnectionParams;
-use grammers_session::types::PeerId;
-use grammers_session::updates::UpdatesLike;
+use grammers_session::{types::PeerId, updates::UpdatesLike};
 use grammers_tl_types as tl;
 use sqlx::SqlitePool;
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
-use crate::config::Config;
-use crate::error::TelegramError;
 use crate::models::{ContentItem, Source};
-use crate::store;
-use crate::tg_session::SqlxSession;
+use crate::{config::Config, error::TelegramError, store, tg_session::SqlxSession};
 
 /// Holds a connected grammers client and its background runner handle.
 pub struct TgConnection {
