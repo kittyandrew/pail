@@ -139,7 +139,7 @@ pub async fn login(client: &Client, config: &Config) -> Result<()> {
         Err(SignInError::PasswordRequired(password_token)) => {
             let hint = password_token.hint().unwrap_or("none");
             println!("Two-factor authentication required (hint: {hint})");
-            let password = rpassword::prompt_password_stdout("Enter 2FA password: ").context("reading 2FA password")?;
+            let password = rpassword::prompt_password("Enter 2FA password: ").context("reading 2FA password")?;
 
             let user = client
                 .check_password(password_token, password.as_bytes())
