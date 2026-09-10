@@ -41,30 +41,22 @@ pub(crate) struct PipelineContext {
 /// Shared setup: channel/source lookup, time window, content fetching, item querying.
 /// Returns None if no content items were found or if cancelled.
 pub(crate) async fn prepare_pipeline_context(
-    pool: &SqlitePool,
-    channel_config: &OutputChannelConfig,
-    time_window: Option<TimeWindow>,
-    fetch_content: bool,
-    tg_client: Option<&Client>,
-    cancel: &CancellationToken,
+    pool: &SqlitePool, channel_config: &OutputChannelConfig, time_window: Option<TimeWindow>, fetch_content: bool,
+    tg_client: Option<&Client>, cancel: &CancellationToken,
 ) -> Result<Option<PipelineContext>> {
     let channel = store::get_channel_by_slug(pool, &channel_config.slug)
         .await
         .context("looking up output channel")?
         .ok_or_else(|| anyhow::anyhow!("no output channel with slug '{}'", channel_config.slug))?;
 
-    let source_ids = store::get_channel_source_ids(pool, &channel.id)
-        .await
-        .context("getting channel source IDs")?;
+    let source_ids = store::get_channel_source_ids(pool, &channel.id).await.context("getting channel source IDs")?;
 
     if source_ids.is_empty() {
         warn!(channel = %channel.name, "no sources configured for this channel");
         return Ok(None);
     }
 
-    let all_sources = store::get_sources_by_ids(pool, &source_ids)
-        .await
-        .context("getting sources")?;
+    let all_sources = store::get_sources_by_ids(pool, &source_ids).await.context("getting sources")?;
 
     let sources: Vec<_> = all_sources.into_iter().filter(|s| s.enabled).collect();
     let source_ids: Vec<String> = sources.iter().map(|s| s.id.clone()).collect();
@@ -83,11 +75,7 @@ pub(crate) async fn prepare_pipeline_context(
         }
         Some(TimeWindow::Explicit { from, to }) => (from, to),
         None => {
-            let from = if let Some(ref last_gen) = channel.last_generated {
-                *last_gen
-            } else {
-                now - chrono::Duration::days(7)
-            };
+            let from = if let Some(ref last_gen) = channel.last_generated { *last_gen } else { now - chrono::Duration::days(7) };
             (from, now)
         }
     };
@@ -112,9 +100,7 @@ pub(crate) async fn prepare_pipeline_context(
                 Ok(result) => {
                     let count = result.items.len();
                     for item in result.items {
-                        store::upsert_content_item(pool, &item)
-                            .await
-                            .context("storing content item")?;
+                        store::upsert_content_item(pool, &item).await.context("storing content item")?;
                     }
                     // Save fetch state (ETag, Last-Modified, last_fetched_at) so conditional
                     // GETs work on subsequent runs and the daemon poller knows when we last fetched
@@ -137,23 +123,15 @@ pub(crate) async fn prepare_pipeline_context(
 
         // TG message history
         if let Some(client) = tg_client {
-            let tg_sources: Vec<_> = sources
-                .iter()
-                .filter(|s| s.source_type.starts_with("telegram_"))
-                .cloned()
-                .collect();
+            let tg_sources: Vec<_> = sources.iter().filter(|s| s.source_type.starts_with("telegram_")).cloned().collect();
             if !tg_sources.is_empty() {
                 info!(count = tg_sources.len(), "fetching TG source history");
-                fetch_tg::fetch_tg_sources(client, pool, &tg_sources, covers_from, cancel)
-                    .await
-                    .context("fetching TG sources")?;
+                fetch_tg::fetch_tg_sources(client, pool, &tg_sources, covers_from, cancel).await.context("fetching TG sources")?;
             }
         }
     }
 
-    let items = store::get_items_in_window(pool, &source_ids, covers_from, covers_to)
-        .await
-        .context("querying content items")?;
+    let items = store::get_items_in_window(pool, &source_ids, covers_from, covers_to).await.context("querying content items")?;
 
     if items.is_empty() {
         let source_names: Vec<&str> = sources.iter().map(|s| s.name.as_str()).collect();
@@ -167,9 +145,7 @@ pub(crate) async fn prepare_pipeline_context(
         // Update last_generated so the next run doesn't re-check this empty window
         // (see docs/specs/generation-engine.md "Empty Digest Handling")
         if !is_override {
-            store::update_last_generated(pool, &channel.id, covers_to)
-                .await
-                .context("updating last_generated")?;
+            store::update_last_generated(pool, &channel.id, covers_to).await.context("updating last_generated")?;
         }
         return Ok(None);
     }
@@ -182,22 +158,12 @@ pub(crate) async fn prepare_pipeline_context(
     let mut folder_channels: HashMap<String, HashMap<i64, (String, Option<String>)>> = HashMap::new();
     for source in &sources {
         if source.source_type == "telegram_folder" {
-            let channels = store::get_folder_channel_map(pool, &source.id)
-                .await
-                .context("getting folder channel map")?;
+            let channels = store::get_folder_channel_map(pool, &source.id).await.context("getting folder channel map")?;
             folder_channels.insert(source.id.clone(), channels);
         }
     }
 
-    Ok(Some(PipelineContext {
-        channel,
-        items,
-        source_map,
-        folder_channels,
-        covers_from,
-        covers_to,
-        is_override,
-    }))
+    Ok(Some(PipelineContext { channel, items, source_map, folder_channels, covers_from, covers_to, is_override }))
 }
 
 /// Run the full generation pipeline for a single output channel.
@@ -208,33 +174,24 @@ pub(crate) async fn prepare_pipeline_context(
 /// Returns `None` if no content items were found (generation skipped).
 #[allow(clippy::too_many_arguments)]
 pub async fn run_generation(
-    pool: &SqlitePool,
-    config: &Config,
-    channel_config: &OutputChannelConfig,
-    registry: &StrategyRegistry,
-    strategy_override: Option<&str>,
-    time_window: Option<TimeWindow>,
-    fetch_content: bool,
-    tg_client: Option<&Client>,
+    pool: &SqlitePool, config: &Config, channel_config: &OutputChannelConfig, registry: &StrategyRegistry,
+    strategy_override: Option<&str>, time_window: Option<TimeWindow>, fetch_content: bool, tg_client: Option<&Client>,
     cancel: CancellationToken,
 ) -> Result<Option<PipelineResult>> {
-    let ctx =
-        match prepare_pipeline_context(pool, channel_config, time_window, fetch_content, tg_client, &cancel).await? {
-            Some(ctx) => ctx,
-            None => return Ok(None),
-        };
+    let ctx = match prepare_pipeline_context(pool, channel_config, time_window, fetch_content, tg_client, &cancel).await? {
+        Some(ctx) => ctx,
+        None => return Ok(None),
+    };
 
     if cancel.is_cancelled() {
         return Ok(None);
     }
 
     // Resolve strategy (CLI override takes precedence)
-    let strategy_name = strategy_override
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| strategy::resolve_strategy_name(config, channel_config));
-    let strategy = registry
-        .get(&strategy_name)
-        .ok_or_else(|| anyhow::anyhow!("strategy '{strategy_name}' not found in registry"))?;
+    let strategy_name =
+        strategy_override.map(|s| s.to_string()).unwrap_or_else(|| strategy::resolve_strategy_name(config, channel_config));
+    let strategy =
+        registry.get(&strategy_name).ok_or_else(|| anyhow::anyhow!("strategy '{strategy_name}' not found in registry"))?;
     let merged_opencode_config = strategy::resolve_opencode_config(strategy)?;
 
     info!(strategy = %strategy_name, "using strategy for generation");
@@ -294,9 +251,7 @@ pub async fn run_generation(
     };
 
     // Store article
-    store::insert_generated_article(pool, &article)
-        .await
-        .context("storing generated article")?;
+    store::insert_generated_article(pool, &article).await.context("storing generated article")?;
 
     // Mark TG channels as read if configured (see docs/specs/telegram.md "Mark-as-Read")
     if channel_config.mark_tg_read.unwrap_or(false) {
@@ -309,9 +264,7 @@ pub async fn run_generation(
 
     // Update last_generated (skip for --since/--from/--to overrides)
     if !ctx.is_override {
-        store::update_last_generated(pool, &ctx.channel.id, ctx.covers_to)
-            .await
-            .context("updating last_generated")?;
+        store::update_last_generated(pool, &ctx.channel.id, ctx.covers_to).await.context("updating last_generated")?;
     }
 
     info!(title = %article.title, "article generated successfully");
@@ -328,14 +281,8 @@ pub async fn run_generation(
 /// Returns the number of content items in the workspace, or None if no items found.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_interactive(
-    pool: &SqlitePool,
-    config: &Config,
-    channel_config: &OutputChannelConfig,
-    registry: &StrategyRegistry,
-    strategy_override: Option<&str>,
-    time_window: Option<TimeWindow>,
-    tg_client: Option<&Client>,
-    cancel: CancellationToken,
+    pool: &SqlitePool, config: &Config, channel_config: &OutputChannelConfig, registry: &StrategyRegistry,
+    strategy_override: Option<&str>, time_window: Option<TimeWindow>, tg_client: Option<&Client>, cancel: CancellationToken,
 ) -> Result<Option<usize>> {
     let ctx = match prepare_pipeline_context(pool, channel_config, time_window, true, tg_client, &cancel).await? {
         Some(ctx) => ctx,
@@ -345,38 +292,25 @@ pub async fn run_interactive(
     let item_count = ctx.items.len();
 
     // Resolve strategy (CLI override takes precedence)
-    let strategy_name = strategy_override
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| strategy::resolve_strategy_name(config, channel_config));
-    let strat = registry
-        .get(&strategy_name)
-        .ok_or_else(|| anyhow::anyhow!("strategy '{strategy_name}' not found in registry"))?;
+    let strategy_name =
+        strategy_override.map(|s| s.to_string()).unwrap_or_else(|| strategy::resolve_strategy_name(config, channel_config));
+    let strat = registry.get(&strategy_name).ok_or_else(|| anyhow::anyhow!("strategy '{strategy_name}' not found in registry"))?;
     let merged_opencode_config = strategy::resolve_opencode_config(strat)?;
 
     // Build reference maps for prepare_workspace
     let source_ref_map: HashMap<String, &models::Source> = ctx.source_map.iter().map(|(k, v)| (k.clone(), v)).collect();
 
     let ws = generate::prepare_workspace(
-        config,
-        channel_config,
-        strat,
-        &merged_opencode_config,
-        &ctx.items,
-        &source_ref_map,
-        &ctx.folder_channels,
-        ctx.covers_from,
-        ctx.covers_to,
+        config, channel_config, strat, &merged_opencode_config, &ctx.items, &source_ref_map, &ctx.folder_channels,
+        ctx.covers_from, ctx.covers_to,
     )
     .await
     .context("preparing interactive workspace")?;
 
-    generate::write_agents_md(ws.path(), strat)
-        .await
-        .context("writing AGENTS.md")?;
+    generate::write_agents_md(ws.path(), strat).await.context("writing AGENTS.md")?;
 
-    let exit_code = generate::invoke_opencode_tui(&config.opencode.binary, ws.path(), &ws.model)
-        .await
-        .context("running opencode TUI")?;
+    let exit_code =
+        generate::invoke_opencode_tui(&config.opencode.binary, ws.path(), &ws.model).await.context("running opencode TUI")?;
 
     if exit_code != Some(0) {
         warn!(exit_code = ?exit_code, "opencode TUI exited with non-zero code");

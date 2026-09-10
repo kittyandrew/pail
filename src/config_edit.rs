@@ -121,10 +121,7 @@ pub fn get_output_channel_names(doc: &DocumentMut) -> Vec<String> {
         return Vec::new();
     };
 
-    channels
-        .iter()
-        .filter_map(|ch| ch.get("name").and_then(|v| v.as_str()).map(|s| s.to_string()))
-        .collect()
+    channels.iter().filter_map(|ch| ch.get("name").and_then(|v| v.as_str()).map(|s| s.to_string())).collect()
 }
 
 /// Get a channel's `sources` array by channel name.
@@ -136,10 +133,7 @@ pub fn get_channel_sources(doc: &DocumentMut, channel_name: &str) -> Vec<String>
     for channel in channels.iter() {
         if channel.get("name").and_then(|v| v.as_str()) == Some(channel_name) {
             if let Some(sources) = channel.get("sources").and_then(|v| v.as_array()) {
-                return sources
-                    .iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                    .collect();
+                return sources.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect();
             }
             return Vec::new();
         }
@@ -184,21 +178,10 @@ pub fn get_tg_sources_detailed(doc: &DocumentMut) -> Vec<TgSourceInfo> {
             }
 
             let tg_id = source.get("tg_id").and_then(|v| v.as_integer());
-            let tg_username = source
-                .get("tg_username")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
-            let tg_folder_name = source
-                .get("tg_folder_name")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
+            let tg_username = source.get("tg_username").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let tg_folder_name = source.get("tg_folder_name").and_then(|v| v.as_str()).map(|s| s.to_string());
 
-            Some(TgSourceInfo {
-                name,
-                tg_id,
-                tg_username,
-                tg_folder_name,
-            })
+            Some(TgSourceInfo { name, tg_id, tg_username, tg_folder_name })
         })
         .collect()
 }

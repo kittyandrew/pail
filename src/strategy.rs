@@ -83,8 +83,8 @@ impl StrategyRegistry {
         let simple = load_builtin(BUILTIN_SIMPLE_PROMPT, None).context("loading built-in 'simple' strategy")?;
         strategies.insert("simple".to_string(), simple);
 
-        let agentic = load_builtin(BUILTIN_AGENTIC_PROMPT, Some(BUILTIN_AGENTIC_OPENCODE))
-            .context("loading built-in 'agentic' strategy")?;
+        let agentic =
+            load_builtin(BUILTIN_AGENTIC_PROMPT, Some(BUILTIN_AGENTIC_OPENCODE)).context("loading built-in 'agentic' strategy")?;
         strategies.insert("agentic".to_string(), agentic);
 
         let brief = load_builtin(BUILTIN_BRIEF_PROMPT, None).context("loading built-in 'brief' strategy")?;
@@ -108,14 +108,13 @@ impl StrategyRegistry {
                 if !path.join("prompt.md").exists() {
                     continue;
                 }
-                let strategy = load_user_strategy(&path)
-                    .with_context(|| format!("loading user strategy from {}", path.display()))?;
+                let strategy =
+                    load_user_strategy(&path).with_context(|| format!("loading user strategy from {}", path.display()))?;
                 let name = strategy.meta.name.clone();
                 if strategies.contains_key(&name) {
-                    return Err(ConfigError::Validation(format!(
-                        "user strategy '{name}' collides with built-in strategy name"
-                    ))
-                    .into());
+                    return Err(
+                        ConfigError::Validation(format!("user strategy '{name}' collides with built-in strategy name")).into()
+                    );
                 }
                 strategies.insert(name, strategy);
             }
@@ -131,11 +130,7 @@ impl StrategyRegistry {
     pub fn list(&self) -> Vec<&Strategy> {
         let mut list: Vec<&Strategy> = self.strategies.values().collect();
         // Sort: built-ins first (alphabetically), then user (alphabetically)
-        list.sort_by(|a, b| {
-            a.source
-                .cmp_builtin_first(&b.source)
-                .then_with(|| a.meta.name.cmp(&b.meta.name))
-        });
+        list.sort_by(|a, b| a.source.cmp_builtin_first(&b.source).then_with(|| a.meta.name.cmp(&b.meta.name)));
         list
     }
 }
@@ -168,10 +163,7 @@ fn parse_strategy_prompt(content: &str) -> Result<(StrategyFrontmatter, String)>
     // Try typed deserialization first (happy path)
     if let Some(result) = matter.parse_with_struct::<StrategyFrontmatter>(content) {
         if result.data.format_version != 1 {
-            anyhow::bail!(
-                "unsupported strategy format_version {} (this binary supports version 1)",
-                result.data.format_version
-            );
+            anyhow::bail!("unsupported strategy format_version {} (this binary supports version 1)", result.data.format_version);
         }
         return Ok((result.data, result.content));
     }
@@ -198,39 +190,25 @@ fn load_builtin(prompt_content: &str, opencode_overlay: Option<&str>) -> Result<
         None => None,
     };
 
-    Ok(Strategy {
-        meta,
-        prompt_body,
-        opencode_overlay: overlay,
-        source: StrategySource::BuiltIn,
-        dir: None,
-    })
+    Ok(Strategy { meta, prompt_body, opencode_overlay: overlay, source: StrategySource::BuiltIn, dir: None })
 }
 
 /// Load a user strategy from a directory on disk.
 pub fn load_user_strategy(dir: &Path) -> Result<Strategy> {
     let prompt_path = dir.join("prompt.md");
-    let prompt_content =
-        std::fs::read_to_string(&prompt_path).with_context(|| format!("reading {}", prompt_path.display()))?;
+    let prompt_content = std::fs::read_to_string(&prompt_path).with_context(|| format!("reading {}", prompt_path.display()))?;
 
     let (meta, prompt_body) = parse_strategy_prompt(&prompt_content)?;
 
     let opencode_path = dir.join("opencode.json");
     let overlay = if opencode_path.exists() {
-        let json_str =
-            std::fs::read_to_string(&opencode_path).with_context(|| format!("reading {}", opencode_path.display()))?;
+        let json_str = std::fs::read_to_string(&opencode_path).with_context(|| format!("reading {}", opencode_path.display()))?;
         Some(serde_json::from_str(&json_str).with_context(|| format!("parsing {}", opencode_path.display()))?)
     } else {
         None
     };
 
-    Ok(Strategy {
-        meta,
-        prompt_body,
-        opencode_overlay: overlay,
-        source: StrategySource::User,
-        dir: Some(dir.to_path_buf()),
-    })
+    Ok(Strategy { meta, prompt_body, opencode_overlay: overlay, source: StrategySource::User, dir: Some(dir.to_path_buf()) })
 }
 
 // ── Deep merge ─────────────────────────────────────────────────────────
@@ -280,10 +258,7 @@ fn builtin_tools() -> HashMap<&'static str, BuiltinTool> {
     let mut map = HashMap::new();
     map.insert(
         "fetch-article",
-        BuiltinTool {
-            files: vec![("fetch-article.ts", TOOL_FETCH_ARTICLE)],
-            package_json: Some(TOOL_PACKAGE_JSON),
-        },
+        BuiltinTool { files: vec![("fetch-article.ts", TOOL_FETCH_ARTICLE)], package_json: Some(TOOL_PACKAGE_JSON) },
     );
     map
 }
@@ -313,8 +288,8 @@ pub fn resolve_tools(strategy: &Strategy) -> Result<ResolvedTools> {
             })?;
 
             let tool_path = strategy_dir.join(tool_name);
-            let content = std::fs::read_to_string(&tool_path)
-                .with_context(|| format!("reading user tool: {}", tool_path.display()))?;
+            let content =
+                std::fs::read_to_string(&tool_path).with_context(|| format!("reading user tool: {}", tool_path.display()))?;
 
             let filename = tool_path
                 .file_name()
@@ -328,10 +303,8 @@ pub fn resolve_tools(strategy: &Strategy) -> Result<ResolvedTools> {
             let tool_dir = tool_path.parent().unwrap_or(strategy_dir);
             let pkg_path = tool_dir.join("package.json");
             if pkg_path.exists() {
-                let pkg_content =
-                    std::fs::read_to_string(&pkg_path).with_context(|| format!("reading {}", pkg_path.display()))?;
-                let pkg: Value =
-                    serde_json::from_str(&pkg_content).with_context(|| format!("parsing {}", pkg_path.display()))?;
+                let pkg_content = std::fs::read_to_string(&pkg_path).with_context(|| format!("reading {}", pkg_path.display()))?;
+                let pkg: Value = serde_json::from_str(&pkg_content).with_context(|| format!("parsing {}", pkg_path.display()))?;
                 if let Some(deps) = pkg.get("dependencies").and_then(|d| d.as_object()) {
                     for (k, v) in deps {
                         merged_deps.insert(k.clone(), v.clone());
@@ -341,11 +314,7 @@ pub fn resolve_tools(strategy: &Strategy) -> Result<ResolvedTools> {
         } else {
             // Built-in tool
             let builtin = builtins.get(tool_name.as_str()).ok_or_else(|| {
-                anyhow::anyhow!(
-                    "strategy '{}' references unknown built-in tool '{}'",
-                    strategy.meta.name,
-                    tool_name
-                )
+                anyhow::anyhow!("strategy '{}' references unknown built-in tool '{}'", strategy.meta.name, tool_name)
             })?;
 
             for (filename, content) in &builtin.files {
@@ -365,10 +334,7 @@ pub fn resolve_tools(strategy: &Strategy) -> Result<ResolvedTools> {
 
     let package_json = serde_json::json!({ "dependencies": merged_deps });
 
-    Ok(ResolvedTools {
-        tool_files,
-        package_json,
-    })
+    Ok(ResolvedTools { tool_files, package_json })
 }
 
 // ── Workspace context ──────────────────────────────────────────────────
@@ -395,10 +361,7 @@ pub fn workspace_context(strategy: &Strategy, include_output_md: bool) -> String
         } else if tool_name.starts_with("./") || tool_name.starts_with("../") {
             // User tool — just show the filename
             if let Some(filename) = Path::new(tool_name).file_name() {
-                ctx.push_str(&format!(
-                    "- `.opencode/tools/{}` — custom tool\n",
-                    filename.to_string_lossy()
-                ));
+                ctx.push_str(&format!("- `.opencode/tools/{}` — custom tool\n", filename.to_string_lossy()));
             }
         } else {
             ctx.push_str(&format!("- `.opencode/tools/{tool_name}` — custom tool\n"));
@@ -415,10 +378,7 @@ pub fn workspace_context(strategy: &Strategy, include_output_md: bool) -> String
 
 /// Resolve the strategy name for a channel: channel override → global default → "simple".
 pub fn resolve_strategy_name(config: &Config, channel_config: &OutputChannelConfig) -> String {
-    channel_config
-        .strategy
-        .clone()
-        .unwrap_or_else(|| config.pail.default_strategy.clone())
+    channel_config.strategy.clone().unwrap_or_else(|| config.pail.default_strategy.clone())
 }
 
 // ── Validation ─────────────────────────────────────────────────────────
@@ -428,10 +388,9 @@ pub fn validate_strategy_config(config: &Config, registry: &StrategyRegistry) ->
     // Check default strategy
     let default = &config.pail.default_strategy;
     if registry.get(default).is_none() {
-        return Err(ConfigError::Validation(format!(
-            "[pail].default_strategy '{default}' does not match any known strategy"
-        ))
-        .into());
+        return Err(
+            ConfigError::Validation(format!("[pail].default_strategy '{default}' does not match any known strategy")).into()
+        );
     }
 
     // Check per-channel strategies

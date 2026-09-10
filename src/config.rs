@@ -78,9 +78,7 @@ pub struct DatabaseConfig {
 
 impl Default for DatabaseConfig {
     fn default() -> Self {
-        Self {
-            path: default_db_path(),
-        }
+        Self { path: default_db_path() }
     }
 }
 
@@ -98,10 +96,7 @@ pub struct OpencodeConfig {
 
 impl Default for OpencodeConfig {
     fn default() -> Self {
-        Self {
-            binary: default_opencode_binary(),
-            default_model: None,
-        }
+        Self { binary: default_opencode_binary(), default_model: None }
     }
 }
 
@@ -182,18 +177,12 @@ impl Config {
     /// Resolve the database path (relative to data_dir if not absolute).
     pub fn db_path(&self) -> PathBuf {
         let db_path = Path::new(&self.database.path);
-        if db_path.is_absolute() {
-            db_path.to_path_buf()
-        } else {
-            self.pail.data_dir.join(db_path)
-        }
+        if db_path.is_absolute() { db_path.to_path_buf() } else { self.pail.data_dir.join(db_path) }
     }
 }
 
 pub fn load_config(path: &Path) -> Result<Config> {
-    let content = std::fs::read_to_string(path)
-        .map_err(ConfigError::ReadFile)
-        .context("reading config file")?;
+    let content = std::fs::read_to_string(path).map_err(ConfigError::ReadFile).context("reading config file")?;
     let mut config: Config = toml::from_str(&content).map_err(ConfigError::Parse)?;
 
     // Allow env var to override data_dir (useful for Docker: set PAIL_DATA_DIR=/var/lib/pail)
@@ -224,11 +213,7 @@ pub fn validate_config(config: &Config) -> Result<()> {
             ))
             .into());
         }
-        if let Some(bad) = source
-            .name
-            .chars()
-            .find(|c| !c.is_alphanumeric() && !" -_.()&,+'".contains(*c))
-        {
+        if let Some(bad) = source.name.chars().find(|c| !c.is_alphanumeric() && !" -_.()&,+'".contains(*c)) {
             return Err(ConfigError::Validation(format!(
                 "source '{}': name contains invalid character {:?} (allowed: letters, digits, spaces, - _ . ( ) & , + ')",
                 source.name, bad
@@ -252,11 +237,7 @@ pub fn validate_config(config: &Config) -> Result<()> {
         match source.source_type.as_str() {
             "rss" => {
                 if source.url.is_none() {
-                    return Err(ConfigError::Validation(format!(
-                        "source '{}': RSS source must have a 'url'",
-                        source.name
-                    ))
-                    .into());
+                    return Err(ConfigError::Validation(format!("source '{}': RSS source must have a 'url'", source.name)).into());
                 }
             }
             "telegram_channel" | "telegram_group" => {
@@ -278,9 +259,7 @@ pub fn validate_config(config: &Config) -> Result<()> {
                 }
             }
             other => {
-                return Err(
-                    ConfigError::Validation(format!("source '{}': unknown type '{}'", source.name, other)).into(),
-                );
+                return Err(ConfigError::Validation(format!("source '{}': unknown type '{}'", source.name, other)).into());
             }
         }
 
@@ -298,11 +277,9 @@ pub fn validate_config(config: &Config) -> Result<()> {
                 }
                 "bearer" => {
                     if auth.token.is_none() {
-                        return Err(ConfigError::Validation(format!(
-                            "source '{}': bearer auth requires 'token'",
-                            source.name
-                        ))
-                        .into());
+                        return Err(
+                            ConfigError::Validation(format!("source '{}': bearer auth requires 'token'", source.name)).into()
+                        );
                     }
                 }
                 "header" => {
@@ -315,11 +292,7 @@ pub fn validate_config(config: &Config) -> Result<()> {
                     }
                 }
                 other => {
-                    return Err(ConfigError::Validation(format!(
-                        "source '{}': unknown auth type '{}'",
-                        source.name, other
-                    ))
-                    .into());
+                    return Err(ConfigError::Validation(format!("source '{}': unknown auth type '{}'", source.name, other)).into());
                 }
             }
         }
@@ -337,10 +310,7 @@ pub fn validate_config(config: &Config) -> Result<()> {
 
         // Validate poll_interval is parseable
         humantime::parse_duration(&source.poll_interval).map_err(|e| {
-            ConfigError::Validation(format!(
-                "source '{}': invalid poll_interval '{}': {}",
-                source.name, source.poll_interval, e
-            ))
+            ConfigError::Validation(format!("source '{}': invalid poll_interval '{}': {}", source.name, source.poll_interval, e))
         })?;
     }
 
@@ -356,16 +326,14 @@ pub fn validate_config(config: &Config) -> Result<()> {
     let has_tg_sources = config.source.iter().any(|s| s.source_type.starts_with("telegram_"));
     if has_tg_sources {
         if !config.telegram.enabled {
-            return Err(ConfigError::Validation(
-                "telegram sources are configured but [telegram].enabled is false".to_string(),
-            )
-            .into());
+            return Err(
+                ConfigError::Validation("telegram sources are configured but [telegram].enabled is false".to_string()).into()
+            );
         }
         match config.telegram.api_id {
             None | Some(0) => {
                 return Err(ConfigError::Validation(
-                    "telegram sources require a valid [telegram].api_id (get one at https://my.telegram.org)"
-                        .to_string(),
+                    "telegram sources require a valid [telegram].api_id (get one at https://my.telegram.org)".to_string(),
                 )
                 .into());
             }
@@ -374,8 +342,7 @@ pub fn validate_config(config: &Config) -> Result<()> {
         match config.telegram.api_hash.as_deref() {
             None | Some("") => {
                 return Err(ConfigError::Validation(
-                    "telegram sources require a valid [telegram].api_hash (get one at https://my.telegram.org)"
-                        .to_string(),
+                    "telegram sources require a valid [telegram].api_hash (get one at https://my.telegram.org)".to_string(),
                 )
                 .into());
             }
@@ -391,10 +358,7 @@ pub fn validate_config(config: &Config) -> Result<()> {
         }
 
         // Validate slug is URL-safe (used in feed paths: /feed/<username>/<slug>.atom)
-        if !channel
-            .slug
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        if !channel.slug.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
             || channel.slug.is_empty()
             || channel.slug.starts_with('-')
             || channel.slug.ends_with('-')
@@ -408,11 +372,9 @@ pub fn validate_config(config: &Config) -> Result<()> {
         }
 
         if channel.sources.is_empty() {
-            return Err(ConfigError::Validation(format!(
-                "output channel '{}': must have at least one source",
-                channel.name
-            ))
-            .into());
+            return Err(
+                ConfigError::Validation(format!("output channel '{}': must have at least one source", channel.name)).into()
+            );
         }
 
         // Validate source references exist
@@ -458,20 +420,10 @@ fn validate_schedule(schedule: &str) -> Result<(), String> {
     } else if let Some(rest) = schedule.strip_prefix("weekly:") {
         let parts: Vec<&str> = rest.splitn(2, ',').collect();
         if parts.len() != 2 {
-            return Err(format!(
-                "invalid weekly schedule '{schedule}': expected 'weekly:DAY,HH:MM'"
-            ));
+            return Err(format!("invalid weekly schedule '{schedule}': expected 'weekly:DAY,HH:MM'"));
         }
         let day = parts[0].trim().to_lowercase();
-        let valid_days = [
-            "monday",
-            "tuesday",
-            "wednesday",
-            "thursday",
-            "friday",
-            "saturday",
-            "sunday",
-        ];
+        let valid_days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
         if !valid_days.contains(&day.as_str()) {
             return Err(format!("invalid day '{day}' in schedule '{schedule}'"));
         }
@@ -480,14 +432,10 @@ fn validate_schedule(schedule: &str) -> Result<(), String> {
     } else if let Some(expr) = schedule.strip_prefix("cron:") {
         // Validate by parsing with the cron crate (7-field: prepend seconds, append year)
         let cron_expr = format!("0 {expr} *");
-        cron_expr
-            .parse::<cron::Schedule>()
-            .map_err(|e| format!("invalid cron expression '{expr}': {e}"))?;
+        cron_expr.parse::<cron::Schedule>().map_err(|e| format!("invalid cron expression '{expr}': {e}"))?;
         Ok(())
     } else {
-        Err(format!(
-            "invalid schedule '{schedule}': must start with 'at:', 'weekly:', or 'cron:'"
-        ))
+        Err(format!("invalid schedule '{schedule}': must start with 'at:', 'weekly:', or 'cron:'"))
     }
 }
 
@@ -497,9 +445,7 @@ fn validate_time(time_str: &str) -> Result<(), String> {
         return Err(format!("invalid time '{time_str}': expected HH:MM"));
     }
     let hour: u32 = parts[0].parse().map_err(|_| format!("invalid hour in '{time_str}'"))?;
-    let minute: u32 = parts[1]
-        .parse()
-        .map_err(|_| format!("invalid minute in '{time_str}'"))?;
+    let minute: u32 = parts[1].parse().map_err(|_| format!("invalid minute in '{time_str}'"))?;
     if hour > 23 {
         return Err(format!("hour {hour} out of range in '{time_str}'"));
     }

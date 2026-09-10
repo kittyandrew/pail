@@ -29,17 +29,12 @@ pub struct TgConnection {
 /// Create a grammers Client connected to Telegram.
 /// Returns the client and the updates receiver (for the listener loop).
 pub async fn connect(config: &Config, pool: &SqlitePool) -> Result<TgConnection> {
-    let api_id = config
-        .telegram
-        .api_id
-        .ok_or_else(|| TelegramError::Connection("api_id not configured".to_string()))?;
+    let api_id = config.telegram.api_id.ok_or_else(|| TelegramError::Connection("api_id not configured".to_string()))?;
 
     info!("loading Telegram session from database");
 
     let session = Arc::new(
-        SqlxSession::load(pool.clone())
-            .await
-            .map_err(|e| TelegramError::Connection(format!("failed to load session: {e}")))?,
+        SqlxSession::load(pool.clone()).await.map_err(|e| TelegramError::Connection(format!("failed to load session: {e}")))?,
     );
 
     let sender_pool = SenderPool::with_configuration(
@@ -53,11 +48,7 @@ pub async fn connect(config: &Config, pool: &SqlitePool) -> Result<TgConnection>
     );
 
     // Destructure to get handle, runner, and updates
-    let SenderPool {
-        runner,
-        handle: fat_handle,
-        updates,
-    } = sender_pool;
+    let SenderPool { runner, handle: fat_handle, updates } = sender_pool;
 
     let client = Client::new(fat_handle);
 
@@ -66,29 +57,18 @@ pub async fn connect(config: &Config, pool: &SqlitePool) -> Result<TgConnection>
         runner.run().await;
     });
 
-    Ok(TgConnection {
-        client,
-        updates_rx: updates,
-        runner_handle,
-    })
+    Ok(TgConnection { client, updates_rx: updates, runner_handle })
 }
 
 /// Interactive login flow (phone -> code -> optional 2FA).
 pub async fn login(client: &Client, config: &Config) -> Result<()> {
-    let api_hash = config
-        .telegram
-        .api_hash
-        .as_deref()
-        .ok_or_else(|| TelegramError::Connection("api_hash not configured".to_string()))?;
+    let api_hash =
+        config.telegram.api_hash.as_deref().ok_or_else(|| TelegramError::Connection("api_hash not configured".to_string()))?;
 
     // Check if already authorized
     if client.is_authorized().await.unwrap_or(false) {
         let me = client.get_me().await.context("getting current user")?;
-        println!(
-            "Already logged in as {} (@{})",
-            me.full_name(),
-            me.username().unwrap_or("no username")
-        );
+        println!("Already logged in as {} (@{})", me.full_name(), me.username().unwrap_or("no username"));
         return Ok(());
     }
 
@@ -100,11 +80,7 @@ pub async fn login(client: &Client, config: &Config) -> Result<()> {
     let phone = phone.trim().to_string();
 
     let masked_phone = if phone.len() > 4 {
-        format!(
-            "{}****{}",
-            &phone[..phone.len() - 4].chars().take(4).collect::<String>(),
-            &phone[phone.len() - 4..]
-        )
+        format!("{}****{}", &phone[..phone.len() - 4].chars().take(4).collect::<String>(), &phone[phone.len() - 4..])
     } else {
         "****".to_string()
     };
@@ -130,11 +106,7 @@ pub async fn login(client: &Client, config: &Config) -> Result<()> {
 
     match client.sign_in(&token, code).await {
         Ok(user) => {
-            println!(
-                "Logged in as {} (@{})",
-                user.full_name(),
-                user.username().unwrap_or("no username")
-            );
+            println!("Logged in as {} (@{})", user.full_name(), user.username().unwrap_or("no username"));
         }
         Err(SignInError::PasswordRequired(password_token)) => {
             let hint = password_token.hint().unwrap_or("none");
@@ -146,11 +118,7 @@ pub async fn login(client: &Client, config: &Config) -> Result<()> {
                 .await
                 .map_err(|e| anyhow::anyhow!("2FA check failed: {e:?}"))?;
 
-            println!(
-                "Logged in as {} (@{})",
-                user.full_name(),
-                user.username().unwrap_or("no username")
-            );
+            println!("Logged in as {} (@{})", user.full_name(), user.username().unwrap_or("no username"));
         }
         Err(SignInError::InvalidCode) => {
             anyhow::bail!("invalid verification code");
@@ -388,10 +356,7 @@ pub async fn ensure_peer_cache(client: &Client, pool: &SqlitePool, sources: &[So
             .context("verifying peer cache")?;
 
         if found.is_none() {
-            warn!(
-                tg_id,
-                "peer not found after dialog iteration — are you a member of this chat?"
-            );
+            warn!(tg_id, "peer not found after dialog iteration — are you a member of this chat?");
         }
     }
 
@@ -400,10 +365,7 @@ pub async fn ensure_peer_cache(client: &Client, pool: &SqlitePool, sources: &[So
 
 /// Build subscription map: chat_id -> Vec<source_id>.
 /// Maps each Telegram chat ID to the list of pail source IDs that want messages from it.
-pub fn build_subscription_map(
-    direct_sources: &[Source],
-    folder_channels: &[(String, i64)],
-) -> HashMap<i64, Vec<String>> {
+pub fn build_subscription_map(direct_sources: &[Source], folder_channels: &[(String, i64)]) -> HashMap<i64, Vec<String>> {
     let mut map: HashMap<i64, Vec<String>> = HashMap::new();
 
     // Add direct channel/group sources by their tg_id
@@ -430,10 +392,8 @@ pub async fn mark_channels_as_read(client: &Client, pool: &SqlitePool, items: &[
     let mut max_msg_per_chat: HashMap<i64, i32> = HashMap::new();
     for item in items {
         if let Ok(meta) = serde_json::from_str::<serde_json::Value>(&item.metadata)
-            && let (Some(chat_id), Some(msg_id)) = (
-                meta.get("chat_id").and_then(|v| v.as_i64()),
-                meta.get("message_id").and_then(|v| v.as_i64()),
-            )
+            && let (Some(chat_id), Some(msg_id)) =
+                (meta.get("chat_id").and_then(|v| v.as_i64()), meta.get("message_id").and_then(|v| v.as_i64()))
         {
             let entry = max_msg_per_chat.entry(chat_id).or_default();
             *entry = (*entry).max(msg_id as i32);
@@ -461,10 +421,7 @@ pub async fn mark_channels_as_read(client: &Client, pool: &SqlitePool, items: &[
         if is_channel {
             let access_hash = peer_ref.auth.hash();
             let request = tl::functions::channels::ReadHistory {
-                channel: tl::enums::InputChannel::Channel(tl::types::InputChannel {
-                    channel_id: chat_id,
-                    access_hash,
-                }),
+                channel: tl::enums::InputChannel::Channel(tl::types::InputChannel { channel_id: chat_id, access_hash }),
                 max_id,
             };
             match client.invoke(&request).await {
@@ -609,12 +566,7 @@ pub async fn list_folders(client: &Client) -> Result<Vec<TgFolder>> {
                 _ => continue,
             };
 
-            channels.push(TgDialog {
-                name: name.unwrap_or_else(|| format!("Unknown ({})", tg_id)),
-                chat_type,
-                username,
-                tg_id,
-            });
+            channels.push(TgDialog { name: name.unwrap_or_else(|| format!("Unknown ({})", tg_id)), chat_type, username, tg_id });
         }
 
         folders.push(TgFolder { name: title, channels });
@@ -685,17 +637,9 @@ async fn fetch_archived_folder(client: &Client) -> Result<TgFolder> {
                 tl::enums::Peer::Chat(c) => (TgChatType::Group, c.chat_id),
             };
 
-            let (name, username) = chat_map
-                .get(&tg_id)
-                .cloned()
-                .unwrap_or_else(|| (format!("Unknown ({tg_id})"), None));
+            let (name, username) = chat_map.get(&tg_id).cloned().unwrap_or_else(|| (format!("Unknown ({tg_id})"), None));
 
-            channels.push(TgDialog {
-                name,
-                chat_type,
-                username,
-                tg_id,
-            });
+            channels.push(TgDialog { name, chat_type, username, tg_id });
         }
 
         if is_final || dialogs.is_empty() {
@@ -745,10 +689,7 @@ async fn fetch_archived_folder(client: &Client) -> Result<TgFolder> {
         }
     }
 
-    Ok(TgFolder {
-        name: "Archived".to_string(),
-        channels,
-    })
+    Ok(TgFolder { name: "Archived".to_string(), channels })
 }
 
 /// Fetch the "about" description for a channel or group.
@@ -805,8 +746,7 @@ fn extract_filter_title(title: &tl::enums::TextWithEntities) -> Option<String> {
 /// Batch-resolve channel InputPeers to (name, username) via a single getChannels call.
 /// Returns a map of channel_id -> (name, username). Non-channel peers are not included.
 async fn batch_resolve_channels(
-    client: &Client,
-    peers: &[&tl::enums::InputPeer],
+    client: &Client, peers: &[&tl::enums::InputPeer],
 ) -> HashMap<i64, (Option<String>, Option<String>)> {
     let mut result = HashMap::new();
 

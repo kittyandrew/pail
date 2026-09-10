@@ -8,32 +8,12 @@ use crate::config::Config;
 /// Ordered list of migrations. Each entry is (version, name, sql).
 /// Versions must be monotonically increasing.
 const MIGRATIONS: &[(i64, &str, &str)] = &[
-    (
-        1,
-        "initial_schema",
-        include_str!("../migrations/20260211_000001_initial_schema.sql"),
-    ),
+    (1, "initial_schema", include_str!("../migrations/20260211_000001_initial_schema.sql")),
     (2, "phase1b", include_str!("../migrations/20260211_000002_phase1b.sql")),
-    (
-        3,
-        "phase2_telegram",
-        include_str!("../migrations/20260212_000003_phase2_telegram.sql"),
-    ),
-    (
-        4,
-        "workspace_improvements",
-        include_str!("../migrations/20260213_000004_workspace_improvements.sql"),
-    ),
-    (
-        5,
-        "nullable_schedule",
-        include_str!("../migrations/20260218_000005_nullable_schedule.sql"),
-    ),
-    (
-        6,
-        "strategy_used",
-        include_str!("../migrations/20260302_000006_strategy_used.sql"),
-    ),
+    (3, "phase2_telegram", include_str!("../migrations/20260212_000003_phase2_telegram.sql")),
+    (4, "workspace_improvements", include_str!("../migrations/20260213_000004_workspace_improvements.sql")),
+    (5, "nullable_schedule", include_str!("../migrations/20260218_000005_nullable_schedule.sql")),
+    (6, "strategy_used", include_str!("../migrations/20260302_000006_strategy_used.sql")),
 ];
 
 pub async fn create_pool(config: &Config) -> Result<SqlitePool> {
@@ -87,9 +67,7 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
         if version <= current_version {
             continue;
         }
-        pool.execute(sql)
-            .await
-            .with_context(|| format!("applying migration v{version} ({name})"))?;
+        pool.execute(sql).await.with_context(|| format!("applying migration v{version} ({name})"))?;
         sqlx::query("INSERT INTO schema_version (version, name) VALUES (?, ?)")
             .bind(version)
             .bind(name)

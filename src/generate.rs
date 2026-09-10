@@ -3,18 +3,19 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use gray_matter::Matter;
-use gray_matter::engine::YAML;
+use gray_matter::{Matter, engine::YAML};
+use tokio::io::AsyncReadExt;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
-
-use tokio::io::AsyncReadExt;
 
 use crate::config::{Config, OutputChannelConfig};
 use crate::error::GenerationError;
 use crate::models::{ContentItem, GeneratedArticle, OutputChannel, Source};
 use crate::strategy::{self, Strategy};
+
+#[cfg(all(test, unix))]
+mod tests;
 
 /// Key for grouping content items in the workspace.
 /// Non-folder sources group by source_id; folder sources split into per-channel groups.
@@ -50,63 +51,32 @@ impl PreparedWorkspace {
 /// Does NOT write prompt.md or output.md — those are mode-specific.
 #[allow(clippy::too_many_arguments)]
 pub async fn prepare_workspace(
-    config: &Config,
-    channel_config: &OutputChannelConfig,
-    strategy: &Strategy,
-    merged_opencode_config: &serde_json::Value,
-    items: &[ContentItem],
-    source_map: &HashMap<String, &Source>,
-    folder_channels: &HashMap<String, HashMap<i64, (String, Option<String>)>>,
-    covers_from: DateTime<Utc>,
+    config: &Config, channel_config: &OutputChannelConfig, strategy: &Strategy, merged_opencode_config: &serde_json::Value,
+    items: &[ContentItem], source_map: &HashMap<String, &Source>,
+    folder_channels: &HashMap<String, HashMap<i64, (String, Option<String>)>>, covers_from: DateTime<Utc>,
     covers_to: DateTime<Utc>,
 ) -> Result<PreparedWorkspace> {
-    let workspace = tempfile::Builder::new()
-        .prefix("pail-gen-")
-        .tempdir()
-        .map_err(GenerationError::Workspace)?;
+    let workspace = tempfile::Builder::new().prefix("pail-gen-").tempdir().map_err(GenerationError::Workspace)?;
 
     let ws_path = workspace.path();
     info!(workspace = %ws_path.display(), strategy = %strategy.meta.name, "preparing workspace");
 
-    let keys: Vec<SourceKey> = items
-        .iter()
-        .map(|item| item_source_key(item, source_map))
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect();
+    let keys: Vec<SourceKey> =
+        items.iter().map(|item| item_source_key(item, source_map)).collect::<HashSet<_>>().into_iter().collect();
     let file_infos = build_source_file_infos(&keys, source_map, folder_channels);
 
-    write_manifest(
-        ws_path,
-        channel_config,
-        items,
-        source_map,
-        &file_infos,
-        covers_from,
-        covers_to,
-        &config.pail.timezone,
-    )
-    .await
-    .context("writing manifest")?;
-
-    write_source_content(ws_path, items, source_map, &file_infos)
+    write_manifest(ws_path, channel_config, items, source_map, &file_infos, covers_from, covers_to, &config.pail.timezone)
         .await
-        .context("writing source content")?;
+        .context("writing manifest")?;
 
-    write_opencode_config(ws_path, merged_opencode_config)
-        .await
-        .context("writing opencode.json")?;
+    write_source_content(ws_path, items, source_map, &file_infos).await.context("writing source content")?;
 
-    write_strategy_tools(ws_path, strategy)
-        .await
-        .context("writing strategy tools")?;
+    write_opencode_config(ws_path, merged_opencode_config).await.context("writing opencode.json")?;
 
-    let model = channel_config
-        .model
-        .as_deref()
-        .or(config.opencode.default_model.as_deref())
-        .unwrap_or("opencode/big-pickle")
-        .to_string();
+    write_strategy_tools(ws_path, strategy).await.context("writing strategy tools")?;
+
+    let model =
+        channel_config.model.as_deref().or(config.opencode.default_model.as_deref()).unwrap_or("opencode/big-pickle").to_string();
 
     Ok(PreparedWorkspace { dir: workspace, model })
 }
@@ -114,9 +84,7 @@ pub async fn prepare_workspace(
 /// Write an `AGENTS.md` file to the workspace with workspace context (for interactive mode).
 pub async fn write_agents_md(ws_path: &Path, strategy: &Strategy) -> Result<()> {
     let content = strategy::workspace_context(strategy, false);
-    tokio::fs::write(ws_path.join("AGENTS.md"), &content)
-        .await
-        .map_err(GenerationError::Workspace)?;
+    tokio::fs::write(ws_path.join("AGENTS.md"), &content).await.map_err(GenerationError::Workspace)?;
     debug!("wrote AGENTS.md");
     Ok(())
 }
@@ -124,9 +92,7 @@ pub async fn write_agents_md(ws_path: &Path, strategy: &Strategy) -> Result<()> 
 /// Write an `opencode.json` project config (merged base + strategy overlay).
 pub async fn write_opencode_config(ws_path: &Path, project_config: &serde_json::Value) -> Result<()> {
     let content = serde_json::to_string_pretty(project_config).context("serializing opencode config")?;
-    tokio::fs::write(ws_path.join("opencode.json"), content)
-        .await
-        .map_err(GenerationError::Workspace)?;
+    tokio::fs::write(ws_path.join("opencode.json"), content).await.map_err(GenerationError::Workspace)?;
     debug!("wrote opencode.json");
     Ok(())
 }
@@ -140,20 +106,14 @@ async fn write_strategy_tools(ws_path: &Path, strategy: &Strategy) -> Result<()>
     }
 
     let tools_dir = ws_path.join(".opencode").join("tools");
-    tokio::fs::create_dir_all(&tools_dir)
-        .await
-        .map_err(GenerationError::Workspace)?;
+    tokio::fs::create_dir_all(&tools_dir).await.map_err(GenerationError::Workspace)?;
 
     for (filename, content) in &resolved.tool_files {
-        tokio::fs::write(tools_dir.join(filename), content)
-            .await
-            .map_err(GenerationError::Workspace)?;
+        tokio::fs::write(tools_dir.join(filename), content).await.map_err(GenerationError::Workspace)?;
     }
 
     let pkg_str = serde_json::to_string_pretty(&resolved.package_json).context("serializing package.json")?;
-    tokio::fs::write(ws_path.join(".opencode").join("package.json"), pkg_str)
-        .await
-        .map_err(GenerationError::Workspace)?;
+    tokio::fs::write(ws_path.join(".opencode").join("package.json"), pkg_str).await.map_err(GenerationError::Workspace)?;
 
     debug!("wrote .opencode/tools/");
     Ok(())
@@ -186,11 +146,7 @@ pub async fn invoke_opencode_tui(binary: &str, workspace: &Path, model: &str) ->
             return Err(GenerationError::OpencodeBinaryNotFound(binary.to_string()).into());
         }
         Err(e) => {
-            return Err(GenerationError::OpencodeExecution {
-                exit_code: None,
-                stderr: e.to_string(),
-            }
-            .into());
+            return Err(GenerationError::OpencodeExecution { exit_code: None, stderr: e.to_string() }.into());
         }
     };
 
@@ -205,10 +161,7 @@ fn item_source_key(item: &ContentItem, source_map: &HashMap<String, &Source>) ->
     if is_folder {
         let meta: serde_json::Value = serde_json::from_str(&item.metadata).unwrap_or_default();
         let chat_id = meta.get("chat_id").and_then(|v| v.as_i64()).unwrap_or(0);
-        SourceKey::FolderChannel {
-            source_id: item.source_id.clone(),
-            chat_id,
-        }
+        SourceKey::FolderChannel { source_id: item.source_id.clone(), chat_id }
     } else {
         SourceKey::Source(item.source_id.clone())
     }
@@ -216,8 +169,7 @@ fn item_source_key(item: &ContentItem, source_map: &HashMap<String, &Source>) ->
 
 /// Build SourceFileInfo for each SourceKey that has items.
 fn build_source_file_infos(
-    keys: &[SourceKey],
-    source_map: &HashMap<String, &Source>,
+    keys: &[SourceKey], source_map: &HashMap<String, &Source>,
     folder_channels: &HashMap<String, HashMap<i64, (String, Option<String>)>>,
 ) -> HashMap<SourceKey, SourceFileInfo> {
     // Track slug usage for dedup
@@ -234,39 +186,23 @@ fn build_source_file_infos(
                 let source = source_map.get(id);
                 (
                     source.map(|s| s.name.clone()).unwrap_or_else(|| "Unknown".to_string()),
-                    source
-                        .map(|s| s.source_type.clone())
-                        .unwrap_or_else(|| "unknown".to_string()),
+                    source.map(|s| s.source_type.clone()).unwrap_or_else(|| "unknown".to_string()),
                     source.and_then(|s| s.description.clone()).unwrap_or_default(),
                 )
             }
             SourceKey::FolderChannel { source_id, chat_id } => {
                 let channel_info = folder_channels.get(source_id).and_then(|m| m.get(chat_id));
-                let ch_name = channel_info
-                    .map(|(n, _)| n.clone())
-                    .unwrap_or_else(|| format!("Channel {chat_id}"));
+                let ch_name = channel_info.map(|(n, _)| n.clone()).unwrap_or_else(|| format!("Channel {chat_id}"));
                 (ch_name, "telegram_channel".to_string(), String::new())
             }
         };
 
         let base_slug = slug_from_name(&name);
         let count = slug_counts.entry(base_slug.clone()).or_default();
-        let slug = if *count == 0 {
-            base_slug.clone()
-        } else {
-            format!("{base_slug}-{}", *count + 1)
-        };
+        let slug = if *count == 0 { base_slug.clone() } else { format!("{base_slug}-{}", *count + 1) };
         *count += 1;
 
-        result.insert(
-            key.clone(),
-            SourceFileInfo {
-                name,
-                source_type,
-                description,
-                slug,
-            },
-        );
+        result.insert(key.clone(), SourceFileInfo { name, source_type, description, slug });
     }
 
     result
@@ -276,54 +212,29 @@ fn build_source_file_infos(
 /// Returns (article, raw_output) where raw_output is the exact content of output.md.
 #[allow(clippy::too_many_arguments)]
 pub async fn generate_article(
-    config: &Config,
-    channel_config: &OutputChannelConfig,
-    strategy: &Strategy,
-    merged_opencode_config: &serde_json::Value,
-    channel: &OutputChannel,
-    items: &[ContentItem],
-    source_map: &HashMap<String, &Source>,
-    folder_channels: &HashMap<String, HashMap<i64, (String, Option<String>)>>,
-    covers_from: DateTime<Utc>,
-    covers_to: DateTime<Utc>,
-    cancel: CancellationToken,
+    config: &Config, channel_config: &OutputChannelConfig, strategy: &Strategy, merged_opencode_config: &serde_json::Value,
+    channel: &OutputChannel, items: &[ContentItem], source_map: &HashMap<String, &Source>,
+    folder_channels: &HashMap<String, HashMap<i64, (String, Option<String>)>>, covers_from: DateTime<Utc>,
+    covers_to: DateTime<Utc>, cancel: CancellationToken,
 ) -> Result<(GeneratedArticle, String)> {
     let ws = prepare_workspace(
-        config,
-        channel_config,
-        strategy,
-        merged_opencode_config,
-        items,
-        source_map,
-        folder_channels,
-        covers_from,
-        covers_to,
+        config, channel_config, strategy, merged_opencode_config, items, source_map, folder_channels, covers_from, covers_to,
     )
     .await
     .context("preparing workspace")?;
 
     let ws_path = ws.path();
 
-    let prompt = write_prompt(ws_path, strategy, channel_config)
-        .await
-        .context("writing prompt")?;
+    let prompt = write_prompt(ws_path, strategy, channel_config).await.context("writing prompt")?;
 
     // Create empty output.md
-    tokio::fs::write(ws_path.join("output.md"), "")
-        .await
-        .map_err(GenerationError::Workspace)?;
+    tokio::fs::write(ws_path.join("output.md"), "").await.map_err(GenerationError::Workspace)?;
 
     // Invoke opencode
-    let (generation_log, exit_code) = invoke_opencode(
-        &config.opencode.binary,
-        ws_path,
-        &ws.model,
-        &prompt,
-        &strategy.meta.timeout,
-        cancel,
-    )
-    .await
-    .context("invoking opencode")?;
+    let (generation_log, exit_code) =
+        invoke_opencode(&config.opencode.binary, ws_path, &ws.model, &prompt, &strategy.meta.timeout, cancel)
+            .await
+            .context("invoking opencode")?;
 
     if exit_code != Some(0) {
         warn!(
@@ -334,9 +245,7 @@ pub async fn generate_article(
 
     // Parse output
     let output_path = ws_path.join("output.md");
-    let output_content = tokio::fs::read_to_string(&output_path)
-        .await
-        .map_err(GenerationError::Workspace)?;
+    let output_content = tokio::fs::read_to_string(&output_path).await.map_err(GenerationError::Workspace)?;
 
     if output_content.trim().is_empty() {
         // @NOTE: warn (not error) so Sentry captures this as a breadcrumb, not a
@@ -391,14 +300,8 @@ pub async fn generate_article(
 
 #[allow(clippy::too_many_arguments)]
 async fn write_manifest(
-    ws_path: &Path,
-    channel_config: &OutputChannelConfig,
-    items: &[ContentItem],
-    source_map: &HashMap<String, &Source>,
-    file_infos: &HashMap<SourceKey, SourceFileInfo>,
-    covers_from: DateTime<Utc>,
-    covers_to: DateTime<Utc>,
-    timezone: &str,
+    ws_path: &Path, channel_config: &OutputChannelConfig, items: &[ContentItem], source_map: &HashMap<String, &Source>,
+    file_infos: &HashMap<SourceKey, SourceFileInfo>, covers_from: DateTime<Utc>, covers_to: DateTime<Utc>, timezone: &str,
 ) -> Result<()> {
     // Count items per source key
     let mut key_item_counts: HashMap<SourceKey, usize> = HashMap::new();
@@ -439,40 +342,27 @@ async fn write_manifest(
 
     let manifest_str = serde_json::to_string_pretty(&manifest).context("serializing manifest")?;
 
-    tokio::fs::write(ws_path.join("manifest.json"), manifest_str)
-        .await
-        .map_err(GenerationError::Workspace)?;
+    tokio::fs::write(ws_path.join("manifest.json"), manifest_str).await.map_err(GenerationError::Workspace)?;
 
     debug!("wrote manifest.json");
     Ok(())
 }
 
-pub(crate) async fn write_prompt(
-    ws_path: &Path,
-    strategy: &Strategy,
-    channel_config: &OutputChannelConfig,
-) -> Result<String> {
-    let rendered = strategy
-        .prompt_body
-        .replace("{editorial_directive}", channel_config.prompt.trim());
+pub(crate) async fn write_prompt(ws_path: &Path, strategy: &Strategy, channel_config: &OutputChannelConfig) -> Result<String> {
+    let rendered = strategy.prompt_body.replace("{editorial_directive}", channel_config.prompt.trim());
 
     // Prepend the workspace context (with output.md bullet) so it's defined in code once
     let prompt = format!("{}{}", strategy::workspace_context(strategy, true), rendered);
 
     // Write to workspace for debugging/inspection only
-    tokio::fs::write(ws_path.join("prompt.md"), &prompt)
-        .await
-        .map_err(GenerationError::Workspace)?;
+    tokio::fs::write(ws_path.join("prompt.md"), &prompt).await.map_err(GenerationError::Workspace)?;
 
     debug!("wrote prompt.md");
     Ok(prompt)
 }
 
 async fn write_source_content(
-    ws_path: &Path,
-    items: &[ContentItem],
-    source_map: &HashMap<String, &Source>,
-    file_infos: &HashMap<SourceKey, SourceFileInfo>,
+    ws_path: &Path, items: &[ContentItem], source_map: &HashMap<String, &Source>, file_infos: &HashMap<SourceKey, SourceFileInfo>,
 ) -> Result<()> {
     // Group items by source key
     let mut items_by_key: HashMap<SourceKey, Vec<&ContentItem>> = HashMap::new();
@@ -482,9 +372,7 @@ async fn write_source_content(
     }
 
     let sources_dir = ws_path.join("sources");
-    tokio::fs::create_dir_all(&sources_dir)
-        .await
-        .map_err(GenerationError::Workspace)?;
+    tokio::fs::create_dir_all(&sources_dir).await.map_err(GenerationError::Workspace)?;
 
     for (key, source_items) in &items_by_key {
         let info = match file_infos.get(key) {
@@ -513,9 +401,7 @@ async fn write_source_content(
         }
 
         let filename = format!("{}.md", info.slug);
-        tokio::fs::write(sources_dir.join(&filename), &content)
-            .await
-            .map_err(GenerationError::Workspace)?;
+        tokio::fs::write(sources_dir.join(&filename), &content).await.map_err(GenerationError::Workspace)?;
 
         debug!(source = %info.name, items = source_items.len(), "wrote source content");
     }
@@ -545,10 +431,7 @@ fn format_content_item(item: &ContentItem) -> String {
         _ => {}
     }
 
-    md.push_str(&format!(
-        "**Date:** {}\n",
-        item.original_date.format("%Y-%m-%d %H:%M UTC")
-    ));
+    md.push_str(&format!("**Date:** {}\n", item.original_date.format("%Y-%m-%d %H:%M UTC")));
 
     // For forwards, label the sender as "Forwarded by" to avoid misattribution
     if let Some(ref author) = item.author {
@@ -600,12 +483,7 @@ fn format_content_item(item: &ContentItem) -> String {
 }
 
 pub(crate) async fn invoke_opencode(
-    binary: &str,
-    workspace: &Path,
-    model: &str,
-    prompt: &str,
-    timeout_str: &str,
-    cancel: CancellationToken,
+    binary: &str, workspace: &Path, model: &str, prompt: &str, timeout_str: &str, cancel: CancellationToken,
 ) -> Result<(String, Option<i32>)> {
     let timeout = humantime::parse_duration(timeout_str).context("parsing opencode timeout")?;
 
@@ -626,6 +504,7 @@ pub(crate) async fn invoke_opencode(
         // Enable opencode's Exa-powered websearch tool so the model can verify
         // facts and find real URLs instead of hallucinating from training data.
         .env("OPENCODE_ENABLE_EXA", "1")
+        .kill_on_drop(true)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
 
@@ -635,24 +514,25 @@ pub(crate) async fn invoke_opencode(
             return Err(GenerationError::OpencodeBinaryNotFound(binary.to_string()).into());
         }
         Err(e) => {
-            return Err(GenerationError::OpencodeExecution {
-                exit_code: None,
-                stderr: e.to_string(),
-            }
-            .into());
+            return Err(GenerationError::OpencodeExecution { exit_code: None, stderr: e.to_string() }.into());
         }
     };
 
-    // Take stdout/stderr handles so we can read them after wait/kill
-    let child_stdout = child.stdout.take();
-    let child_stderr = child.stderr.take();
+    // @NOTE: Drain both pipes while the process runs; a full pipe blocks its exit. - Sep 10, 2026
+    let mut child_stdout = child.stdout.take().expect("stdout is piped");
+    let mut child_stderr = child.stderr.take().expect("stderr is piped");
+    let mut out = Vec::new();
+    let mut err = Vec::new();
 
     // Wait for completion, timeout, or cancellation (see docs/specs/daemon.md "Graceful Shutdown")
     tokio::select! {
-        r = tokio::time::timeout(timeout, child.wait()) => {
+        r = tokio::time::timeout(timeout, async {
+            tokio::try_join!(child.wait(), child_stdout.read_to_end(&mut out), child_stderr.read_to_end(&mut err))
+        }) => {
             match r {
-                Ok(Ok(status)) => {
-                    let (stdout, stderr) = read_child_pipes(child_stdout, child_stderr).await;
+                Ok(Ok((status, _, _))) => {
+                    let stdout = String::from_utf8_lossy(&out);
+                    let stderr = String::from_utf8_lossy(&err);
                     let log = format!("=== STDOUT ===\n{stdout}\n=== STDERR ===\n{stderr}");
                     let exit_code = status.code();
                     if !status.success() {
@@ -670,9 +550,10 @@ pub(crate) async fn invoke_opencode(
                 }.into()),
                 Err(_) => {
                     warn!("opencode timed out, killing subprocess");
-                    let _ = child.kill().await;
-                    let _ = child.wait().await;
-                    let (stdout, stderr) = read_child_pipes(child_stdout, child_stderr).await;
+                    child.kill().await.context("killing timed-out opencode")?;
+                    // @NOTE: Use buffered bytes; descendants can keep pipes open after the child exits. - Sep 10, 2026
+                    let stdout = String::from_utf8_lossy(&out);
+                    let stderr = String::from_utf8_lossy(&err);
                     let partial_log = format!("=== STDOUT (partial) ===\n{stdout}\n=== STDERR (partial) ===\n{stderr}");
                     Err(GenerationError::Timeout(
                         format!("{timeout_str}. Partial log:\n{partial_log}")
@@ -682,9 +563,9 @@ pub(crate) async fn invoke_opencode(
         }
         _ = cancel.cancelled() => {
             warn!("generation cancelled, killing opencode subprocess");
-            let _ = child.kill().await;
-            let _ = child.wait().await;
-            let (stdout, stderr) = read_child_pipes(child_stdout, child_stderr).await;
+            child.kill().await.context("killing cancelled opencode")?;
+            let stdout = String::from_utf8_lossy(&out);
+            let stderr = String::from_utf8_lossy(&err);
             let partial_log = format!("=== STDOUT (partial) ===\n{stdout}\n=== STDERR (partial) ===\n{stderr}");
             Err(GenerationError::OpencodeExecution {
                 exit_code: None,
@@ -694,35 +575,12 @@ pub(crate) async fn invoke_opencode(
     }
 }
 
-async fn read_child_pipes(
-    stdout: Option<tokio::process::ChildStdout>,
-    stderr: Option<tokio::process::ChildStderr>,
-) -> (String, String) {
-    let stdout_str = if let Some(mut out) = stdout {
-        let mut buf = Vec::new();
-        let _ = out.read_to_end(&mut buf).await;
-        String::from_utf8_lossy(&buf).to_string()
-    } else {
-        String::new()
-    };
-    let stderr_str = if let Some(mut err) = stderr {
-        let mut buf = Vec::new();
-        let _ = err.read_to_end(&mut buf).await;
-        String::from_utf8_lossy(&buf).to_string()
-    } else {
-        String::new()
-    };
-    (stdout_str, stderr_str)
-}
-
 fn extract_share_url(generation_log: &str) -> Option<String> {
     const PREFIX: &str = "https://opncd.ai/share/";
     let start = generation_log.find(PREFIX)?;
     let rest = &generation_log[start..];
     // URL ends at the first character that isn't valid in a URL path segment
-    let end = rest
-        .find(|c: char| c.is_whitespace() || c.is_control() || c == '\x1b')
-        .unwrap_or(rest.len());
+    let end = rest.find(|c: char| c.is_whitespace() || c.is_control() || c == '\x1b').unwrap_or(rest.len());
     Some(rest[..end].to_string())
 }
 
@@ -733,18 +591,14 @@ fn parse_output(content: &str) -> Result<(String, Vec<String>, String)> {
     // Extract frontmatter data into an owned hashmap
     let frontmatter = result.data.as_ref().and_then(|d| d.as_hashmap().ok());
 
-    let title = frontmatter
-        .as_ref()
-        .and_then(|m| m.get("title"))
-        .and_then(|v| v.as_string().ok())
-        .unwrap_or_else(|| {
-            // Fallback: extract title from first # heading
-            content
-                .lines()
-                .find(|l| l.starts_with("# "))
-                .map(|l| l.trim_start_matches("# ").to_string())
-                .unwrap_or_else(|| "Untitled Digest".to_string())
-        });
+    let title = frontmatter.as_ref().and_then(|m| m.get("title")).and_then(|v| v.as_string().ok()).unwrap_or_else(|| {
+        // Fallback: extract title from first # heading
+        content
+            .lines()
+            .find(|l| l.starts_with("# "))
+            .map(|l| l.trim_start_matches("# ").to_string())
+            .unwrap_or_else(|| "Untitled Digest".to_string())
+    });
 
     let topics: Vec<String> = frontmatter
         .as_ref()
@@ -909,21 +763,13 @@ pub async fn validate_models(config: &Config) -> Result<()> {
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let available: HashSet<String> = stdout
-        .lines()
-        .map(|l| strip_ansi(l).trim().to_string())
-        .filter(|l| !l.is_empty())
-        .collect();
+    let available: HashSet<String> = stdout.lines().map(|l| strip_ansi(l).trim().to_string()).filter(|l| !l.is_empty()).collect();
 
     // Collect all effective models from config (deduplicated)
     let mut models_to_check: HashMap<String, Vec<String>> = HashMap::new(); // model -> channel names
     for channel in &config.output_channel {
-        let model = channel
-            .model
-            .as_deref()
-            .or(config.opencode.default_model.as_deref())
-            .unwrap_or("opencode/big-pickle")
-            .to_string();
+        let model =
+            channel.model.as_deref().or(config.opencode.default_model.as_deref()).unwrap_or("opencode/big-pickle").to_string();
         models_to_check.entry(model).or_default().push(channel.name.clone());
     }
 
@@ -931,10 +777,8 @@ pub async fn validate_models(config: &Config) -> Result<()> {
     for (model, channels) in &models_to_check {
         if !available.contains(model) {
             let provider = model.split('/').next().unwrap_or("unknown");
-            missing.push(format!(
-                "model '{model}' (used by: {}) — is the '{provider}' provider authenticated?",
-                channels.join(", ")
-            ));
+            missing
+                .push(format!("model '{model}' (used by: {}) — is the '{provider}' provider authenticated?", channels.join(", ")));
         }
     }
 

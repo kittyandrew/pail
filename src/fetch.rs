@@ -19,10 +19,10 @@ pub struct FetchResult {
 /// Fetch RSS items from a source. Returns ContentItems and HTTP cache headers.
 /// On 304 Not Modified, returns an empty items list with the existing cache headers.
 pub async fn fetch_rss_source(source: &Source) -> Result<FetchResult> {
-    let url = source.url.as_deref().ok_or_else(|| FetchError::Parse {
-        url: source.name.clone(),
-        message: "RSS source has no URL".to_string(),
-    })?;
+    let url = source
+        .url
+        .as_deref()
+        .ok_or_else(|| FetchError::Parse { url: source.name.clone(), message: "RSS source has no URL".to_string() })?;
 
     let max_items = source.max_items as usize;
 
@@ -72,10 +72,7 @@ pub async fn fetch_rss_source(source: &Source) -> Result<FetchResult> {
         }
     }
 
-    headers.insert(
-        USER_AGENT,
-        HeaderValue::from_static(concat!("pail/", env!("CARGO_PKG_VERSION"))),
-    );
+    headers.insert(USER_AGENT, HeaderValue::from_static(concat!("pail/", env!("CARGO_PKG_VERSION"))));
 
     // Add conditional GET headers if we have cached values
     if let Some(ref etag) = source.last_etag
@@ -93,29 +90,15 @@ pub async fn fetch_rss_source(source: &Source) -> Result<FetchResult> {
         .timeout(std::time::Duration::from_secs(30))
         .default_headers(headers)
         .build()
-        .map_err(|e| FetchError::Http {
-            url: url.to_string(),
-            source: e,
-        })?;
+        .map_err(|e| FetchError::Http { url: url.to_string(), source: e })?;
 
     debug!(url = %url, source = %source.name, "fetching RSS feed");
 
-    let response = client.get(url).send().await.map_err(|e| FetchError::Http {
-        url: url.to_string(),
-        source: e,
-    })?;
+    let response = client.get(url).send().await.map_err(|e| FetchError::Http { url: url.to_string(), source: e })?;
 
     // Extract cache headers from response before consuming the body
-    let resp_etag = response
-        .headers()
-        .get("etag")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
-    let resp_last_modified = response
-        .headers()
-        .get("last-modified")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
+    let resp_etag = response.headers().get("etag").and_then(|v| v.to_str().ok()).map(|s| s.to_string());
+    let resp_last_modified = response.headers().get("last-modified").and_then(|v| v.to_str().ok()).map(|s| s.to_string());
 
     // Handle 304 Not Modified — feed hasn't changed
     if response.status() == reqwest::StatusCode::NOT_MODIFIED {
@@ -129,22 +112,13 @@ pub async fn fetch_rss_source(source: &Source) -> Result<FetchResult> {
 
     // Check for HTTP errors before trying to parse the body as RSS
     if !response.status().is_success() {
-        return Err(FetchError::Http {
-            url: url.to_string(),
-            source: response.error_for_status().unwrap_err(),
-        }
-        .into());
+        return Err(FetchError::Http { url: url.to_string(), source: response.error_for_status().unwrap_err() }.into());
     }
 
-    let body = response.bytes().await.map_err(|e| FetchError::Http {
-        url: url.to_string(),
-        source: e,
-    })?;
+    let body = response.bytes().await.map_err(|e| FetchError::Http { url: url.to_string(), source: e })?;
 
-    let feed = feed_rs::parser::parse(&body[..]).map_err(|e| FetchError::Parse {
-        url: url.to_string(),
-        message: e.to_string(),
-    })?;
+    let feed =
+        feed_rs::parser::parse(&body[..]).map_err(|e| FetchError::Parse { url: url.to_string(), message: e.to_string() })?;
 
     let now = Utc::now();
 
@@ -154,11 +128,7 @@ pub async fn fetch_rss_source(source: &Source) -> Result<FetchResult> {
         .take(max_items)
         .filter_map(|entry| {
             // Get the best content: prefer content over summary
-            let raw_body = entry
-                .content
-                .and_then(|c| c.body)
-                .or_else(|| entry.summary.map(|s| s.content))
-                .unwrap_or_default();
+            let raw_body = entry.content.and_then(|c| c.body).or_else(|| entry.summary.map(|s| s.content)).unwrap_or_default();
 
             // Convert HTML to plain text (RSS bodies are often HTML)
             let body = strip_html(&raw_body);
@@ -209,11 +179,7 @@ pub async fn fetch_rss_source(source: &Source) -> Result<FetchResult> {
         warn!(source = %source.name, url = %url, "feed returned no usable items");
     }
 
-    Ok(FetchResult {
-        items,
-        etag: resp_etag,
-        last_modified: resp_last_modified,
-    })
+    Ok(FetchResult { items, etag: resp_etag, last_modified: resp_last_modified })
 }
 
 /// Convert HTML to plain text. If the input doesn't look like HTML, return it as-is.

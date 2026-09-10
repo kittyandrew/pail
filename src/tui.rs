@@ -44,12 +44,7 @@ struct DialogSelectItem {
 
 impl fmt::Display for DialogSelectItem {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let username = self
-            .dialog
-            .username
-            .as_ref()
-            .map(|u| format!(" (@{u})"))
-            .unwrap_or_default();
+        let username = self.dialog.username.as_ref().map(|u| format!(" (@{u})")).unwrap_or_default();
         write!(f, "[{}] {}{}", self.dialog.chat_type, self.dialog.name, username)
     }
 }
@@ -71,14 +66,8 @@ impl fmt::Display for ViewAction {
 
 /// Collected selections from the two views, passed to apply_selection.
 enum SelectedItem {
-    Folder {
-        name: String,
-        existing_source_name: Option<String>,
-    },
-    Dialog {
-        dialog: TgDialog,
-        existing_source_name: Option<String>,
-    },
+    Folder { name: String, existing_source_name: Option<String> },
+    Dialog { dialog: TgDialog, existing_source_name: Option<String> },
 }
 
 // ─── Entry point ───
@@ -131,10 +120,7 @@ pub async fn run_config_editor(config_path: &Path, tg_conn: Option<&TgConnection
             .map(|name| {
                 let ch_sources = config_edit::get_channel_sources(&doc, name);
                 let summary = build_source_summary(&ch_sources, &tg_sources, &all_source_names);
-                OutputChannelItem {
-                    name: name.clone(),
-                    source_summary: summary,
-                }
+                OutputChannelItem { name: name.clone(), source_summary: summary }
             })
             .collect();
 
@@ -186,11 +172,7 @@ fn build_source_summary(ch_sources: &[String], tg_sources: &[TgSourceInfo], all_
     if rss_count > 0 {
         parts.push(format!("{rss_count} RSS"));
     }
-    if parts.is_empty() {
-        "no sources".to_string()
-    } else {
-        parts.join(", ")
-    }
+    if parts.is_empty() { "no sources".to_string() } else { parts.join(", ") }
 }
 
 // ─── Channel edit ───
@@ -199,11 +181,7 @@ fn build_source_summary(ch_sources: &[String], tg_sources: &[TgSourceInfo], all_
 /// View-switching loop: toggle between Channels/Groups and Folders views.
 /// Esc from the view selector saves and exits.
 async fn run_channel_edit(
-    config_path: &Path,
-    channel_name: &str,
-    dialogs: &[TgDialog],
-    folders: &[TgFolder],
-    client: &Client,
+    config_path: &Path, channel_name: &str, dialogs: &[TgDialog], folders: &[TgFolder], client: &Client,
 ) -> Result<()> {
     let content = std::fs::read_to_string(config_path)?;
     let doc = config_edit::parse_document(&content)?;
@@ -232,9 +210,7 @@ async fn run_channel_edit(
         }
     }
     for f in folders {
-        if let Some(ts) = tg_sources
-            .iter()
-            .find(|ts| ts.tg_folder_name.as_deref() == Some(&f.name))
+        if let Some(ts) = tg_sources.iter().find(|ts| ts.tg_folder_name.as_deref() == Some(&f.name))
             && channel_sources.contains(&ts.name)
         {
             selected_folder_names.insert(f.name.clone());
@@ -249,10 +225,8 @@ async fn run_channel_edit(
         }
         println!();
 
-        let actions = vec![
-            ViewAction::ChannelsGroups(selected_dialog_ids.len()),
-            ViewAction::Folders(selected_folder_names.len()),
-        ];
+        let actions =
+            vec![ViewAction::ChannelsGroups(selected_dialog_ids.len()), ViewAction::Folders(selected_folder_names.len())];
 
         let action = match Select::new("Select view to edit (Esc to save & exit):", actions).prompt() {
             Ok(a) => a,
@@ -262,8 +236,7 @@ async fn run_channel_edit(
 
         match action {
             ViewAction::ChannelsGroups(_) => {
-                let items: Vec<DialogSelectItem> =
-                    dialogs.iter().map(|d| DialogSelectItem { dialog: d.clone() }).collect();
+                let items: Vec<DialogSelectItem> = dialogs.iter().map(|d| DialogSelectItem { dialog: d.clone() }).collect();
 
                 let defaults: Vec<usize> = items
                     .iter()
@@ -293,13 +266,8 @@ async fn run_channel_edit(
                     continue;
                 }
 
-                let items: Vec<FolderSelectItem> = folders
-                    .iter()
-                    .map(|f| FolderSelectItem {
-                        name: f.name.clone(),
-                        channel_count: f.channels.len(),
-                    })
-                    .collect();
+                let items: Vec<FolderSelectItem> =
+                    folders.iter().map(|f| FolderSelectItem { name: f.name.clone(), channel_count: f.channels.len() }).collect();
 
                 let defaults: Vec<usize> = items
                     .iter()
@@ -331,23 +299,15 @@ async fn run_channel_edit(
 
     for f in folders {
         if selected_folder_names.contains(&f.name) {
-            let existing = tg_sources
-                .iter()
-                .find(|ts| ts.tg_folder_name.as_deref() == Some(&f.name))
-                .map(|ts| ts.name.clone());
-            selected_items.push(SelectedItem::Folder {
-                name: f.name.clone(),
-                existing_source_name: existing,
-            });
+            let existing = tg_sources.iter().find(|ts| ts.tg_folder_name.as_deref() == Some(&f.name)).map(|ts| ts.name.clone());
+            selected_items.push(SelectedItem::Folder { name: f.name.clone(), existing_source_name: existing });
         }
     }
 
     for d in dialogs {
         if selected_dialog_ids.contains(&d.tg_id) {
-            selected_items.push(SelectedItem::Dialog {
-                dialog: d.clone(),
-                existing_source_name: match_dialog_to_source(d, &tg_sources),
-            });
+            selected_items
+                .push(SelectedItem::Dialog { dialog: d.clone(), existing_source_name: match_dialog_to_source(d, &tg_sources) });
         }
     }
 
@@ -414,10 +374,7 @@ async fn apply_selection(ctx: &ApplyContext<'_>, client: &Client) -> Result<()> 
 
     for item in ctx.selected {
         match item {
-            SelectedItem::Folder {
-                name: folder_name,
-                existing_source_name,
-            } => {
+            SelectedItem::Folder { name: folder_name, existing_source_name } => {
                 if let Some(existing) = existing_source_name {
                     new_tg_names.push(existing.clone());
                 } else {
@@ -437,10 +394,7 @@ async fn apply_selection(ctx: &ApplyContext<'_>, client: &Client) -> Result<()> 
                     new_tg_names.push(unique);
                 }
             }
-            SelectedItem::Dialog {
-                dialog,
-                existing_source_name,
-            } => {
+            SelectedItem::Dialog { dialog, existing_source_name } => {
                 if let Some(existing) = existing_source_name {
                     new_tg_names.push(existing.clone());
                 } else {
@@ -475,11 +429,7 @@ async fn apply_selection(ctx: &ApplyContext<'_>, client: &Client) -> Result<()> 
     let new_set: HashSet<&String> = final_sources.iter().collect();
 
     let added: Vec<&String> = final_sources.iter().filter(|s| !old_set.contains(s)).collect();
-    let removed: Vec<&String> = ctx
-        .old_channel_sources
-        .iter()
-        .filter(|s| !new_set.contains(s))
-        .collect();
+    let removed: Vec<&String> = ctx.old_channel_sources.iter().filter(|s| !new_set.contains(s)).collect();
 
     if added.is_empty() && removed.is_empty() && sources_to_add.is_empty() {
         println!("No changes.");
@@ -501,13 +451,7 @@ async fn apply_selection(ctx: &ApplyContext<'_>, client: &Client) -> Result<()> 
                 println!("  {} (type=telegram_folder, folder={})", src.name, folder);
             } else {
                 let username = src.tg_username.as_deref().unwrap_or("?");
-                println!(
-                    "  {} (type={}, @{}, tg_id={})",
-                    src.name,
-                    src.source_type,
-                    username,
-                    src.tg_id.unwrap_or(0)
-                );
+                println!("  {} (type={}, @{}, tg_id={})", src.name, src.source_type, username, src.tg_id.unwrap_or(0));
             }
         }
     }

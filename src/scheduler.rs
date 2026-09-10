@@ -48,8 +48,8 @@ impl Schedule {
         if let Some(times_str) = s.strip_prefix("at:") {
             let mut times = Vec::new();
             for part in times_str.split(',') {
-                let t = NaiveTime::parse_from_str(part.trim(), "%H:%M")
-                    .with_context(|| format!("invalid time '{}'", part.trim()))?;
+                let t =
+                    NaiveTime::parse_from_str(part.trim(), "%H:%M").with_context(|| format!("invalid time '{}'", part.trim()))?;
                 times.push(t);
             }
             times.sort();
@@ -67,11 +67,8 @@ impl Schedule {
             // The cron crate expects 7-field (sec min hour dom mon dow year) expressions.
             // Standard 5-field cron: prepend "0" for seconds, append "*" for year.
             let cron_expr = format!("0 {expr} *");
-            let schedule =
-                cron::Schedule::from_str(&cron_expr).with_context(|| format!("invalid cron expression '{expr}'"))?;
-            Ok(Schedule::Cron {
-                schedule: Box::new(schedule),
-            })
+            let schedule = cron::Schedule::from_str(&cron_expr).with_context(|| format!("invalid cron expression '{expr}'"))?;
+            Ok(Schedule::Cron { schedule: Box::new(schedule) })
         } else {
             anyhow::bail!("invalid schedule '{s}': must start with 'at:', 'weekly:', or 'cron:'");
         }
@@ -108,8 +105,7 @@ impl Schedule {
 
                 // Days until next occurrence
                 let days_ahead =
-                    (target_weekday.num_days_from_monday() as i64 - current_weekday.num_days_from_monday() as i64 + 7)
-                        % 7;
+                    (target_weekday.num_days_from_monday() as i64 - current_weekday.num_days_from_monday() as i64 + 7) % 7;
 
                 // If it's the same day, check if time has passed
                 let candidate_date = if days_ahead == 0 {
@@ -130,9 +126,7 @@ impl Schedule {
                 }
                 // DST gap on target date — try next week
                 let fallback = candidate_date + chrono::Duration::days(7);
-                tz.from_local_datetime(&fallback.and_time(*time))
-                    .earliest()
-                    .map(|c| c.with_timezone(&Utc))
+                tz.from_local_datetime(&fallback.and_time(*time)).earliest().map(|c| c.with_timezone(&Utc))
             }
             Schedule::Cron { schedule } => schedule.after(&after).next(),
         }
@@ -165,12 +159,8 @@ fn parse_weekday(s: &str) -> Result<Weekday> {
 
 /// Main scheduler loop. Wakes every 30 seconds and checks all enabled channels.
 pub async fn scheduler_loop(
-    pool: SqlitePool,
-    config: Arc<Config>,
-    registry: Arc<StrategyRegistry>,
-    semaphore: Arc<Semaphore>,
-    tg_client: Option<grammers_client::Client>,
-    cancel: CancellationToken,
+    pool: SqlitePool, config: Arc<Config>, registry: Arc<StrategyRegistry>, semaphore: Arc<Semaphore>,
+    tg_client: Option<grammers_client::Client>, cancel: CancellationToken,
 ) {
     info!("scheduler started");
 
@@ -234,9 +224,7 @@ pub async fn scheduler_loop(
             // as the reference point. They wait for their next scheduled tick rather than
             // firing immediately. The pipeline still uses the 7-day lookback for content
             // collection when last_generated is NULL.
-            let after = channel
-                .last_generated
-                .unwrap_or_else(|| *first_seen.entry(channel.id.clone()).or_insert(now));
+            let after = channel.last_generated.unwrap_or_else(|| *first_seen.entry(channel.id.clone()).or_insert(now));
 
             if !schedule.is_due(tz, after, now) {
                 continue;
@@ -265,10 +253,7 @@ pub async fn scheduler_loop(
 
             tokio::spawn(async move {
                 // Guard ensures channel is removed from in-flight set on drop (including panic)
-                let _guard = InFlightGuard {
-                    set: in_flight,
-                    channel_id,
-                };
+                let _guard = InFlightGuard { set: in_flight, channel_id };
 
                 // Acquire semaphore permit (limits concurrent generations)
                 let _permit = match semaphore.acquire().await {

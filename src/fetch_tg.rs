@@ -16,9 +16,7 @@ use crate::store;
 /// Convert a grammers Message to a pail ContentItem.
 /// Returns None for empty messages (no text, no media).
 pub fn message_to_content_item(
-    msg: &grammers_client::message::Message,
-    source_id: &str,
-    peer_username: Option<&str>,
+    msg: &grammers_client::message::Message, source_id: &str, peer_username: Option<&str>,
 ) -> Option<ContentItem> {
     let chat_id = msg.peer_id().bare_id();
     let message_id = msg.id();
@@ -124,11 +122,7 @@ pub fn message_to_content_item(
 /// Fetch recent TG message history for all TG sources in a channel (CLI mode).
 /// Analogous to the RSS one-shot fetch block in pipeline.rs.
 pub async fn fetch_tg_sources(
-    client: &Client,
-    pool: &SqlitePool,
-    sources: &[Source],
-    since: DateTime<Utc>,
-    cancel: &CancellationToken,
+    client: &Client, pool: &SqlitePool, sources: &[Source], since: DateTime<Utc>, cancel: &CancellationToken,
 ) -> Result<()> {
     for (i, source) in sources.iter().enumerate() {
         if cancel.is_cancelled() {
@@ -174,15 +168,7 @@ pub async fn fetch_tg_sources(
                     if i > 0 {
                         tokio::time::sleep(Duration::from_millis(500)).await;
                     }
-                    match fetch_channel_history(
-                        client,
-                        pool,
-                        &source.id,
-                        *channel_tg_id,
-                        channel_username.as_deref(),
-                        since,
-                    )
-                    .await
+                    match fetch_channel_history(client, pool, &source.id, *channel_tg_id, channel_username.as_deref(), since).await
                     {
                         Ok(count) => {
                             debug!(source = %source.name, channel_tg_id, items = count, "fetched folder channel history")
@@ -215,10 +201,7 @@ pub async fn resolve_peer_ref(pool: &SqlitePool, tg_id: i64) -> Result<PeerRef> 
         .context("looking up channel peer")?
         .flatten()
     {
-        return Ok(PeerRef {
-            id: PeerId::channel(tg_id),
-            auth: PeerAuth::from_hash(hash),
-        });
+        return Ok(PeerRef { id: PeerId::channel(tg_id), auth: PeerAuth::from_hash(hash) });
     }
 
     // Try as basic group chat
@@ -229,28 +212,17 @@ pub async fn resolve_peer_ref(pool: &SqlitePool, tg_id: i64) -> Result<PeerRef> 
         .await
         .context("looking up chat peer")?
     {
-        return Ok(PeerRef {
-            id: PeerId::chat(tg_id),
-            auth: row.0.map(PeerAuth::from_hash).unwrap_or(PeerAuth::from_hash(0)),
-        });
+        return Ok(PeerRef { id: PeerId::chat(tg_id), auth: row.0.map(PeerAuth::from_hash).unwrap_or(PeerAuth::from_hash(0)) });
     }
 
     // Fallback: assume channel (most common)
-    Ok(PeerRef {
-        id: PeerId::channel(tg_id),
-        auth: PeerAuth::from_hash(0),
-    })
+    Ok(PeerRef { id: PeerId::channel(tg_id), auth: PeerAuth::from_hash(0) })
 }
 
 /// Fetch message history for a single TG channel/group.
 /// Returns the number of items stored.
 async fn fetch_channel_history(
-    client: &Client,
-    pool: &SqlitePool,
-    source_id: &str,
-    tg_id: i64,
-    peer_username: Option<&str>,
-    since: DateTime<Utc>,
+    client: &Client, pool: &SqlitePool, source_id: &str, tg_id: i64, peer_username: Option<&str>, since: DateTime<Utc>,
 ) -> Result<usize> {
     let peer_ref = resolve_peer_ref(pool, tg_id).await?;
 
@@ -265,9 +237,7 @@ async fn fetch_channel_history(
         }
 
         if let Some(item) = message_to_content_item(&msg, source_id, peer_username) {
-            store::upsert_content_item(pool, &item)
-                .await
-                .context("storing TG history item")?;
+            store::upsert_content_item(pool, &item).await.context("storing TG history item")?;
             count += 1;
         }
     }

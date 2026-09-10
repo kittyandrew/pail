@@ -18,11 +18,8 @@ use crate::telegram;
 /// Run the Telegram event listener loop.
 /// Receives live updates and stores messages from subscribed chats.
 pub async fn listener_loop(
-    client: Client,
-    pool: SqlitePool,
-    subscriptions: Arc<RwLock<HashMap<i64, Vec<String>>>>,
-    updates_rx: mpsc::UnboundedReceiver<UpdatesLike>,
-    cancel: CancellationToken,
+    client: Client, pool: SqlitePool, subscriptions: Arc<RwLock<HashMap<i64, Vec<String>>>>,
+    updates_rx: mpsc::UnboundedReceiver<UpdatesLike>, cancel: CancellationToken,
 ) {
     info!("Telegram listener started");
 
@@ -60,9 +57,7 @@ pub async fn listener_loop(
 
 /// Handle an incoming new message from a subscribed chat.
 async fn handle_message(
-    msg: &grammers_client::update::Message,
-    pool: &SqlitePool,
-    subscriptions: &Arc<RwLock<HashMap<i64, Vec<String>>>>,
+    msg: &grammers_client::update::Message, pool: &SqlitePool, subscriptions: &Arc<RwLock<HashMap<i64, Vec<String>>>>,
 ) {
     // Get chat ID
     let chat_id = msg.peer_id().bare_id();
@@ -101,16 +96,10 @@ async fn handle_message(
 
 /// Handle raw TL updates — specifically folder changes (updateDialogFilter).
 async fn handle_raw_update(
-    raw: &grammers_client::update::Raw,
-    client: &Client,
-    pool: &SqlitePool,
-    subscriptions: &Arc<RwLock<HashMap<i64, Vec<String>>>>,
+    raw: &grammers_client::update::Raw, client: &Client, pool: &SqlitePool, subscriptions: &Arc<RwLock<HashMap<i64, Vec<String>>>>,
 ) {
     // Check if this is an updateDialogFilter event
-    let is_dialog_filter_update = matches!(
-        &**raw,
-        tl::enums::Update::DialogFilter(_) | tl::enums::Update::DialogFilterOrder(_)
-    );
+    let is_dialog_filter_update = matches!(&**raw, tl::enums::Update::DialogFilter(_) | tl::enums::Update::DialogFilterOrder(_));
 
     if !is_dialog_filter_update {
         return;
@@ -120,10 +109,7 @@ async fn handle_raw_update(
 
     // Re-resolve all folder sources
     let folder_sources = match store::get_tg_sources(pool).await {
-        Ok(sources) => sources
-            .into_iter()
-            .filter(|s| s.source_type == "telegram_folder")
-            .collect::<Vec<_>>(),
+        Ok(sources) => sources.into_iter().filter(|s| s.source_type == "telegram_folder").collect::<Vec<_>>(),
         Err(e) => {
             error!(error = %e, "failed to load folder sources for re-resolution");
             return;
@@ -152,11 +138,7 @@ async fn handle_raw_update(
         }
     };
 
-    let direct_sources: Vec<_> = tg_sources
-        .iter()
-        .filter(|s| s.source_type != "telegram_folder")
-        .cloned()
-        .collect();
+    let direct_sources: Vec<_> = tg_sources.iter().filter(|s| s.source_type != "telegram_folder").cloned().collect();
 
     let new_map = telegram::build_subscription_map(&direct_sources, &folder_channels);
     let count = new_map.len();
