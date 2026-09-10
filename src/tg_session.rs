@@ -6,13 +6,11 @@
 //! symbol linker errors. This module reimplements the Session trait using sqlx to avoid
 //! the conflict entirely. See docs/specs/telegram.md "Session Management" for full details.
 
-use std::collections::HashMap;
-use std::sync::Mutex;
+use std::{collections::HashMap, sync::Mutex};
 
 use futures_core::future::BoxFuture;
-use grammers_session::Session;
-use grammers_session::types::UpdatesState;
 use grammers_session::types::{ChannelKind, ChannelState, DcOption, PeerAuth, PeerId, PeerInfo, PeerKind, UpdateState};
+use grammers_session::{Session, types::UpdatesState};
 use sqlx::SqlitePool;
 use tracing::warn;
 

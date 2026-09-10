@@ -97,7 +97,7 @@ dependencies or build plumbing.
 - **No imports inside functions or mid-file.** All `use` statements go at the top of the file.
 - Use Rust edition 2024. Run `cargo fix --edition` before changing older editions in `Cargo.toml`.
 - Follow `rustfmt.toml`: 131 columns for lines and width heuristics, with compressed function parameters. Verify the configuration before formatting.
-- Group related imports into single-line `use` statements up to 131 columns. Split larger groups into separate statements.
+- Group related imports into as few single-line `use` statements as fit within 131 columns. After formatting, combine imports from the same crate when they still fit; do not leave a separate import for one leftover type.
 
 ## Git Workflow
 
