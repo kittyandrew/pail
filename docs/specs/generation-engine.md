@@ -233,10 +233,6 @@ Timeout, max_retries, system prompt, and opencode project config are all defined
 
 ## Decisions
 
-- **Example and CI model:** `opencode/ling-3.0-flash-fin-free` in `config.example.toml`.
-  Options: keep big-pickle / Ling 3.0 Flash Fin Free / Nemotron 3.5 Lightning Free.
-  Rationale: big-pickle's CI generation exceeded the job timeout. Ling completed a writing probe with the pinned CLI; Nemotron timed out. CI uses the example config for its live digest check.
-
 - **LLM integration method:** shell out to opencode as a subprocess.
   Options: shell out to opencode / direct LLM API calls in Rust / Python subprocess / MCP client.
   Rationale: gets all model support, MCP tools, agentic behavior, authentication for free. No LLM client code to maintain in Rust.

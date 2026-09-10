@@ -139,10 +139,6 @@ tg_folder_name = "News"
 
 ## Decisions
 
-- **2FA password input:** rpassword 7.5 `prompt_password` reads from the controlling terminal with echo suppressed.
-  Options: upgrade the terminal prompt API / keep rpassword 5.
-  Rationale: rpassword 7.5 fixes GHSA-2p6r-x3vv-xqm2; the older stdout prompt API is unavailable in the patched release.
-
 - **Telegram library:** grammers.
   Options: grammers (Rust) / TDLib (C++, FFI) / Telethon (Python) / GramJS (JS/TS) / Pyrogram (Python).
   Rationale: Rust-native MTProto by Lonami (Telethon author). No FFI, no separate runtime. Pre-1.0 but actively developed.
