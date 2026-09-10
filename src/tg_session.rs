@@ -11,9 +11,8 @@ use std::sync::Mutex;
 
 use futures_core::future::BoxFuture;
 use grammers_session::Session;
-use grammers_session::types::{
-    ChannelKind, ChannelState, DcOption, PeerAuth, PeerId, PeerInfo, PeerKind, UpdateState, UpdatesState,
-};
+use grammers_session::types::UpdatesState;
+use grammers_session::types::{ChannelKind, ChannelState, DcOption, PeerAuth, PeerId, PeerInfo, PeerKind, UpdateState};
 use sqlx::SqlitePool;
 use tracing::warn;
 
@@ -25,56 +24,31 @@ const KNOWN_DC_OPTIONS: [DcOption; 5] = [
     DcOption {
         id: 1,
         ipv4: std::net::SocketAddrV4::new(std::net::Ipv4Addr::new(149, 154, 175, 53), 443),
-        ipv6: std::net::SocketAddrV6::new(
-            std::net::Ipv6Addr::new(0x2001, 0xb28, 0xf23d, 0xf001, 0, 0, 0, 0xa),
-            443,
-            0,
-            0,
-        ),
+        ipv6: std::net::SocketAddrV6::new(std::net::Ipv6Addr::new(0x2001, 0xb28, 0xf23d, 0xf001, 0, 0, 0, 0xa), 443, 0, 0),
         auth_key: None,
     },
     DcOption {
         id: 2,
         ipv4: std::net::SocketAddrV4::new(std::net::Ipv4Addr::new(149, 154, 167, 41), 443),
-        ipv6: std::net::SocketAddrV6::new(
-            std::net::Ipv6Addr::new(0x2001, 0x67c, 0x4e8, 0xf002, 0, 0, 0, 0xa),
-            443,
-            0,
-            0,
-        ),
+        ipv6: std::net::SocketAddrV6::new(std::net::Ipv6Addr::new(0x2001, 0x67c, 0x4e8, 0xf002, 0, 0, 0, 0xa), 443, 0, 0),
         auth_key: None,
     },
     DcOption {
         id: 3,
         ipv4: std::net::SocketAddrV4::new(std::net::Ipv4Addr::new(149, 154, 175, 100), 443),
-        ipv6: std::net::SocketAddrV6::new(
-            std::net::Ipv6Addr::new(0x2001, 0xb28, 0xf23d, 0xf003, 0, 0, 0, 0xa),
-            443,
-            0,
-            0,
-        ),
+        ipv6: std::net::SocketAddrV6::new(std::net::Ipv6Addr::new(0x2001, 0xb28, 0xf23d, 0xf003, 0, 0, 0, 0xa), 443, 0, 0),
         auth_key: None,
     },
     DcOption {
         id: 4,
         ipv4: std::net::SocketAddrV4::new(std::net::Ipv4Addr::new(149, 154, 167, 92), 443),
-        ipv6: std::net::SocketAddrV6::new(
-            std::net::Ipv6Addr::new(0x2001, 0x67c, 0x4e8, 0xf004, 0, 0, 0, 0xa),
-            443,
-            0,
-            0,
-        ),
+        ipv6: std::net::SocketAddrV6::new(std::net::Ipv6Addr::new(0x2001, 0x67c, 0x4e8, 0xf004, 0, 0, 0, 0xa), 443, 0, 0),
         auth_key: None,
     },
     DcOption {
         id: 5,
         ipv4: std::net::SocketAddrV4::new(std::net::Ipv4Addr::new(91, 108, 56, 104), 443),
-        ipv6: std::net::SocketAddrV6::new(
-            std::net::Ipv6Addr::new(0x2001, 0xb28, 0xf23f, 0xf005, 0, 0, 0, 0xa),
-            443,
-            0,
-            0,
-        ),
+        ipv6: std::net::SocketAddrV6::new(std::net::Ipv6Addr::new(0x2001, 0xb28, 0xf23f, 0xf005, 0, 0, 0, 0xa), 443, 0, 0),
         auth_key: None,
     },
 ];
@@ -107,17 +81,14 @@ impl SqlxSession {
     /// The tg_* tables must already exist (created by the Phase 2 migration).
     pub async fn load(pool: SqlitePool) -> anyhow::Result<Self> {
         // Load home DC from DB, default to DC 2
-        let home_dc: i32 = sqlx::query_scalar("SELECT dc_id FROM tg_dc_home LIMIT 1")
-            .fetch_optional(&pool)
-            .await?
-            .unwrap_or(DEFAULT_DC);
+        let home_dc: i32 =
+            sqlx::query_scalar("SELECT dc_id FROM tg_dc_home LIMIT 1").fetch_optional(&pool).await?.unwrap_or(DEFAULT_DC);
 
         // Load DC options from DB
-        let rows = sqlx::query_as::<_, (i32, String, String, Option<Vec<u8>>)>(
-            "SELECT dc_id, ipv4, ipv6, auth_key FROM tg_dc_option",
-        )
-        .fetch_all(&pool)
-        .await?;
+        let rows =
+            sqlx::query_as::<_, (i32, String, String, Option<Vec<u8>>)>("SELECT dc_id, ipv4, ipv6, auth_key FROM tg_dc_option")
+                .fetch_all(&pool)
+                .await?;
 
         let mut dc_options = HashMap::new();
         for (dc_id, ipv4_str, ipv6_str, auth_key_bytes) in rows {
@@ -133,21 +104,10 @@ impl SqlxSession {
                 let arr: Result<[u8; 256], _> = bytes.try_into();
                 arr.ok()
             });
-            dc_options.insert(
-                dc_id,
-                DcOption {
-                    id: dc_id,
-                    ipv4,
-                    ipv6,
-                    auth_key,
-                },
-            );
+            dc_options.insert(dc_id, DcOption { id: dc_id, ipv4, ipv6, auth_key });
         }
 
-        Ok(Self {
-            pool,
-            cache: Mutex::new(Cache { home_dc, dc_options }),
-        })
+        Ok(Self { pool, cache: Mutex::new(Cache { home_dc, dc_options }) })
     }
 }
 
@@ -162,11 +122,7 @@ impl Session for SqlxSession {
             if let Err(e) = sqlx::query("DELETE FROM tg_dc_home").execute(&self.pool).await {
                 warn!(error = %e, "failed to clear tg_dc_home");
             }
-            if let Err(e) = sqlx::query("INSERT INTO tg_dc_home (dc_id) VALUES (?)")
-                .bind(dc_id)
-                .execute(&self.pool)
-                .await
-            {
+            if let Err(e) = sqlx::query("INSERT INTO tg_dc_home (dc_id) VALUES (?)").bind(dc_id).execute(&self.pool).await {
                 warn!(error = %e, dc_id, "failed to persist home DC");
             }
         })
@@ -183,22 +139,17 @@ impl Session for SqlxSession {
     }
 
     fn set_dc_option(&self, dc_option: &DcOption) -> BoxFuture<'_, ()> {
-        self.cache
-            .lock()
-            .unwrap()
-            .dc_options
-            .insert(dc_option.id, dc_option.clone());
+        self.cache.lock().unwrap().dc_options.insert(dc_option.id, dc_option.clone());
         let dc_option = dc_option.clone();
         Box::pin(async move {
             let auth_key_bytes = dc_option.auth_key.map(|k| k.to_vec());
-            if let Err(e) =
-                sqlx::query("INSERT OR REPLACE INTO tg_dc_option (dc_id, ipv4, ipv6, auth_key) VALUES (?, ?, ?, ?)")
-                    .bind(dc_option.id)
-                    .bind(dc_option.ipv4.to_string())
-                    .bind(dc_option.ipv6.to_string())
-                    .bind(auth_key_bytes)
-                    .execute(&self.pool)
-                    .await
+            if let Err(e) = sqlx::query("INSERT OR REPLACE INTO tg_dc_option (dc_id, ipv4, ipv6, auth_key) VALUES (?, ?, ?, ?)")
+                .bind(dc_option.id)
+                .bind(dc_option.ipv4.to_string())
+                .bind(dc_option.ipv6.to_string())
+                .bind(auth_key_bytes)
+                .execute(&self.pool)
+                .await
             {
                 warn!(error = %e, dc_id = dc_option.id, "failed to persist DC option");
             }
@@ -302,40 +253,31 @@ impl Session for SqlxSession {
 
     fn updates_state(&self) -> BoxFuture<'_, UpdatesState> {
         Box::pin(async move {
-            let primary = match sqlx::query_as::<_, (i32, i32, i32, i32)>(
-                "SELECT pts, qts, date, seq FROM tg_update_state LIMIT 1",
-            )
-            .fetch_optional(&self.pool)
-            .await
-            {
-                Ok(row) => row,
-                Err(e) => {
-                    warn!(error = %e, "failed to load update state");
-                    None
-                }
-            };
+            let primary =
+                match sqlx::query_as::<_, (i32, i32, i32, i32)>("SELECT pts, qts, date, seq FROM tg_update_state LIMIT 1")
+                    .fetch_optional(&self.pool)
+                    .await
+                {
+                    Ok(row) => row,
+                    Err(e) => {
+                        warn!(error = %e, "failed to load update state");
+                        None
+                    }
+                };
 
             let mut state = match primary {
-                Some((pts, qts, date, seq)) => UpdatesState {
-                    pts,
-                    qts,
-                    date,
-                    seq,
-                    channels: Vec::new(),
-                },
+                Some((pts, qts, date, seq)) => UpdatesState { pts, qts, date, seq, channels: Vec::new() },
                 None => UpdatesState::default(),
             };
 
-            let channels = match sqlx::query_as::<_, (i64, i32)>("SELECT peer_id, pts FROM tg_channel_state")
-                .fetch_all(&self.pool)
-                .await
-            {
-                Ok(rows) => rows,
-                Err(e) => {
-                    warn!(error = %e, "failed to load channel states");
-                    Vec::new()
-                }
-            };
+            let channels =
+                match sqlx::query_as::<_, (i64, i32)>("SELECT peer_id, pts FROM tg_channel_state").fetch_all(&self.pool).await {
+                    Ok(rows) => rows,
+                    Err(e) => {
+                        warn!(error = %e, "failed to load channel states");
+                        Vec::new()
+                    }
+                };
 
             state.channels = channels.into_iter().map(|(id, pts)| ChannelState { id, pts }).collect();
 
@@ -409,10 +351,7 @@ impl Session for SqlxSession {
                         .is_some();
 
                     let result = if exists {
-                        sqlx::query("UPDATE tg_update_state SET qts = ?")
-                            .bind(qts)
-                            .execute(&self.pool)
-                            .await
+                        sqlx::query("UPDATE tg_update_state SET qts = ?").bind(qts).execute(&self.pool).await
                     } else {
                         sqlx::query("INSERT INTO tg_update_state (pts, qts, date, seq) VALUES (0, ?, 0, 0)")
                             .bind(qts)

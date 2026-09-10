@@ -37,7 +37,7 @@ Periodic (e.g., hourly) sweep to delete content items older than the configurabl
 On `SIGTERM` or `SIGINT`:
 
 1. **Stop accepting new work:** Scheduler stops ticking, RSS poller stops fetching.
-2. **Cancel in-progress generations:** Kill running opencode subprocesses via `child.kill()` (SIGKILL — more reliable than SIGTERM since opencode doesn't need graceful cleanup). Capture whatever stdout/stderr has been produced so far and store as a partial generation log. `last_generated` is not updated, so the next tick after restart covers the full window.
+2. **Cancel in-progress generations:** Kill running opencode subprocesses via `child.kill()` (SIGKILL). Preserve stdout/stderr bytes already read as a partial generation log. Stop reading at cancellation because descendants can keep the pipes open. Unread bytes are omitted. `last_generated` is not updated, so the next tick after restart covers the full window.
 3. **Flush pending writes:** Ensure all content items from TG events and RSS fetches are committed to the DB.
 4. **Close Telegram session:** Cleanly disconnect the MTProto session so it can be resumed on next startup without re-auth.
 5. **Close DB connections.**
@@ -61,9 +61,9 @@ Shutdown should complete in seconds, not minutes. Each step is logged at INFO le
   Options: fire immediately / wait for next tick.
   Rationale: gives the RSS poller and TG listener time to collect content before the first generation. Uses 7-day default lookback when the tick arrives.
 
-- **Opencode process kill on shutdown:** SIGKILL via `child.kill()`.
-  Options: SIGTERM (graceful) / SIGKILL (immediate).
-  Rationale: SIGKILL is more reliable. opencode doesn't need graceful cleanup — it's a subprocess writing to a temp workspace. Fast shutdown matters more than clean process exit.
+- **Opencode process kill on shutdown:** SIGKILL via `child.kill()`, retaining already-captured output.
+  Options: SIGTERM / SIGKILL; drain pipes to EOF / retain captured bytes.
+  Rationale: opencode writes to a temporary workspace and needs no graceful cleanup. Waiting for descendant-held pipes can delay shutdown indefinitely. Shutdown takes priority over unread output.
 
 - **First generation lookback:** 7 days default.
   Options: 1 day / 7 days / 30 days / configurable.

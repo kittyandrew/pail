@@ -108,9 +108,7 @@ pub async fn upsert_source(pool: &SqlitePool, source: &crate::config::SourceConf
 
 /// Upsert an output channel by slug.
 pub async fn upsert_output_channel(
-    pool: &SqlitePool,
-    channel: &crate::config::OutputChannelConfig,
-    source_ids: &[String],
+    pool: &SqlitePool, channel: &crate::config::OutputChannelConfig, source_ids: &[String],
 ) -> Result<String> {
     let enabled = channel.enabled.unwrap_or(true);
 
@@ -194,37 +192,25 @@ pub async fn sync_config_to_db(pool: &SqlitePool, config: &Config) -> Result<()>
     let mut config_channel_slugs = std::collections::HashSet::new();
     for channel in &config.output_channel {
         config_channel_slugs.insert(channel.slug.clone());
-        let source_ids: Vec<String> = channel
-            .sources
-            .iter()
-            .filter_map(|name| source_name_to_id.get(name).cloned())
-            .collect();
+        let source_ids: Vec<String> = channel.sources.iter().filter_map(|name| source_name_to_id.get(name).cloned()).collect();
         upsert_output_channel(pool, channel, &source_ids).await?;
     }
 
     // Delete sources not in config
     let config_source_ids: Vec<&str> = source_name_to_id.values().map(|s| s.as_str()).collect();
-    let db_sources: Vec<(String, String)> = sqlx::query_as("SELECT id, name FROM sources")
-        .fetch_all(pool)
-        .await
-        .context("listing sources for cleanup")?;
+    let db_sources: Vec<(String, String)> =
+        sqlx::query_as("SELECT id, name FROM sources").fetch_all(pool).await.context("listing sources for cleanup")?;
 
     for (id, name) in &db_sources {
         if !config_source_ids.contains(&id.as_str()) {
-            sqlx::query("DELETE FROM sources WHERE id = ?")
-                .bind(id)
-                .execute(pool)
-                .await
-                .context("deleting orphaned source")?;
+            sqlx::query("DELETE FROM sources WHERE id = ?").bind(id).execute(pool).await.context("deleting orphaned source")?;
             debug!(name = %name, "deleted orphaned source");
         }
     }
 
     // Delete output channels not in config
-    let db_channels: Vec<(String, String)> = sqlx::query_as("SELECT id, slug FROM output_channels")
-        .fetch_all(pool)
-        .await
-        .context("listing channels for cleanup")?;
+    let db_channels: Vec<(String, String)> =
+        sqlx::query_as("SELECT id, slug FROM output_channels").fetch_all(pool).await.context("listing channels for cleanup")?;
 
     for (id, slug) in &db_channels {
         if !config_channel_slugs.contains(slug.as_str()) {
@@ -256,12 +242,11 @@ pub async fn get_channel_by_slug(pool: &SqlitePool, slug: &str) -> Result<Option
 
 /// Get source IDs linked to an output channel.
 pub async fn get_channel_source_ids(pool: &SqlitePool, channel_id: &str) -> Result<Vec<String>> {
-    let rows: Vec<(String,)> =
-        sqlx::query_as("SELECT source_id FROM output_channel_sources WHERE output_channel_id = ?")
-            .bind(channel_id)
-            .fetch_all(pool)
-            .await
-            .context("querying channel source IDs")?;
+    let rows: Vec<(String,)> = sqlx::query_as("SELECT source_id FROM output_channel_sources WHERE output_channel_id = ?")
+        .bind(channel_id)
+        .fetch_all(pool)
+        .await
+        .context("querying channel source IDs")?;
 
     Ok(rows.into_iter().map(|(id,)| id).collect())
 }
@@ -273,10 +258,7 @@ pub async fn get_sources_by_ids(pool: &SqlitePool, ids: &[String]) -> Result<Vec
     }
 
     let placeholders: Vec<&str> = ids.iter().map(|_| "?").collect();
-    let query = format!(
-        "SELECT {SOURCE_COLUMNS} FROM sources WHERE id IN ({})",
-        placeholders.join(", ")
-    );
+    let query = format!("SELECT {SOURCE_COLUMNS} FROM sources WHERE id IN ({})", placeholders.join(", "));
 
     let mut q = sqlx::query_as::<_, Source>(&query);
     for id in ids {
@@ -316,10 +298,7 @@ pub async fn upsert_content_item(pool: &SqlitePool, item: &ContentItem) -> Resul
 
 /// Get content items within a time window for the given source IDs.
 pub async fn get_items_in_window(
-    pool: &SqlitePool,
-    source_ids: &[String],
-    from: DateTime<Utc>,
-    to: DateTime<Utc>,
+    pool: &SqlitePool, source_ids: &[String], from: DateTime<Utc>, to: DateTime<Utc>,
 ) -> Result<Vec<ContentItem>> {
     if source_ids.is_empty() {
         return Ok(Vec::new());
@@ -340,9 +319,7 @@ pub async fn get_items_in_window(
     for id in source_ids {
         q = q.bind(id);
     }
-    q = q
-        .bind(from.format("%Y-%m-%dT%H:%M:%SZ").to_string())
-        .bind(to.format("%Y-%m-%dT%H:%M:%SZ").to_string());
+    q = q.bind(from.format("%Y-%m-%dT%H:%M:%SZ").to_string()).bind(to.format("%Y-%m-%dT%H:%M:%SZ").to_string());
 
     let items = q.fetch_all(pool).await.context("querying content items in window")?;
 
@@ -351,8 +328,7 @@ pub async fn get_items_in_window(
 
 /// Insert a generated article.
 pub async fn insert_generated_article(pool: &SqlitePool, article: &GeneratedArticle) -> Result<()> {
-    let content_item_ids_json =
-        serde_json::to_string(&article.content_item_ids).context("serializing content_item_ids")?;
+    let content_item_ids_json = serde_json::to_string(&article.content_item_ids).context("serializing content_item_ids")?;
     let topics_json = serde_json::to_string(&article.topics).context("serializing topics")?;
 
     sqlx::query(
@@ -419,11 +395,7 @@ pub async fn set_setting(pool: &SqlitePool, key: &str, value: &str) -> Result<()
 
 /// Update fetch state on a source: last_fetched_at, ETag, and Last-Modified.
 pub async fn update_source_fetch_state(
-    pool: &SqlitePool,
-    source_id: &str,
-    timestamp: DateTime<Utc>,
-    etag: Option<&str>,
-    last_modified: Option<&str>,
+    pool: &SqlitePool, source_id: &str, timestamp: DateTime<Utc>, etag: Option<&str>, last_modified: Option<&str>,
 ) -> Result<()> {
     sqlx::query("UPDATE sources SET last_fetched_at = ?, last_etag = ?, last_modified_header = ? WHERE id = ?")
         .bind(timestamp.format("%Y-%m-%dT%H:%M:%SZ").to_string())
@@ -493,10 +465,7 @@ pub async fn get_article_by_id(pool: &SqlitePool, article_id: &str) -> Result<Op
 /// Get all enabled sources.
 pub async fn get_all_enabled_sources(pool: &SqlitePool) -> Result<Vec<Source>> {
     let query = format!("SELECT {SOURCE_COLUMNS} FROM sources WHERE enabled = 1");
-    let sources = sqlx::query_as::<_, Source>(&query)
-        .fetch_all(pool)
-        .await
-        .context("querying enabled sources")?;
+    let sources = sqlx::query_as::<_, Source>(&query).fetch_all(pool).await.context("querying enabled sources")?;
     Ok(sources)
 }
 
@@ -505,10 +474,7 @@ pub async fn get_all_enabled_sources(pool: &SqlitePool) -> Result<Vec<Source>> {
 /// Get enabled sources where type starts with "telegram_".
 pub async fn get_tg_sources(pool: &SqlitePool) -> Result<Vec<Source>> {
     let query = format!("SELECT {SOURCE_COLUMNS} FROM sources WHERE enabled = 1 AND source_type LIKE 'telegram_%'");
-    let sources = sqlx::query_as::<_, Source>(&query)
-        .fetch_all(pool)
-        .await
-        .context("querying TG sources")?;
+    let sources = sqlx::query_as::<_, Source>(&query).fetch_all(pool).await.context("querying TG sources")?;
     Ok(sources)
 }
 
@@ -536,11 +502,7 @@ pub async fn update_source_tg_folder_id(pool: &SqlitePool, source_id: &str, fold
 
 /// Upsert a channel belonging to a folder source.
 pub async fn upsert_folder_channel(
-    pool: &SqlitePool,
-    folder_source_id: &str,
-    channel_tg_id: i64,
-    name: Option<&str>,
-    username: Option<&str>,
+    pool: &SqlitePool, folder_source_id: &str, channel_tg_id: i64, name: Option<&str>, username: Option<&str>,
 ) -> Result<()> {
     sqlx::query(
         "INSERT INTO tg_folder_channels (folder_source_id, channel_tg_id, channel_name, channel_username)
@@ -572,8 +534,7 @@ pub async fn delete_folder_channels(pool: &SqlitePool, folder_source_id: &str) -
 /// Get channels belonging to a folder source with their info.
 /// Returns (channel_tg_id, channel_name, channel_username) for enabled channels.
 pub async fn get_folder_channels_with_info(
-    pool: &SqlitePool,
-    folder_source_id: &str,
+    pool: &SqlitePool, folder_source_id: &str,
 ) -> Result<Vec<(i64, Option<String>, Option<String>)>> {
     let rows: Vec<(i64, Option<String>, Option<String>)> = sqlx::query_as(
         "SELECT channel_tg_id, channel_name, channel_username FROM tg_folder_channels WHERE folder_source_id = ? AND enabled = 1",
@@ -587,10 +548,7 @@ pub async fn get_folder_channels_with_info(
 
 /// Get a map of channel_tg_id → (channel_name, channel_username) for a folder source.
 /// Used during workspace generation to split folder items into per-channel source files.
-pub async fn get_folder_channel_map(
-    pool: &SqlitePool,
-    folder_source_id: &str,
-) -> Result<HashMap<i64, (String, Option<String>)>> {
+pub async fn get_folder_channel_map(pool: &SqlitePool, folder_source_id: &str) -> Result<HashMap<i64, (String, Option<String>)>> {
     let rows: Vec<(i64, Option<String>, Option<String>)> = sqlx::query_as(
         "SELECT channel_tg_id, channel_name, channel_username FROM tg_folder_channels WHERE folder_source_id = ? AND enabled = 1",
     )

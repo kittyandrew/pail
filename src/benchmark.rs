@@ -59,11 +59,7 @@ async fn discover_models(binary: &str, filter: Option<&str>) -> Result<Vec<Strin
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let all_models: Vec<String> = stdout
-        .lines()
-        .map(|l| l.trim().to_string())
-        .filter(|l| !l.is_empty())
-        .collect();
+    let all_models: Vec<String> = stdout.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect();
 
     if let Some(filter_str) = filter {
         let requested: Vec<String> = filter_str.split(',').map(|s| s.trim().to_string()).collect();
@@ -175,10 +171,7 @@ async fn export_session(binary: &str, workspace_dir: &Path, dest: &Path, log_tex
     // Match session by share URL suffix from stderr, fall back to first (most recent)
     let share_suffix = parse_share_suffix(log_text);
     let session_id = if let Some(ref suffix) = share_suffix {
-        sessions
-            .iter()
-            .find(|s| s.id.ends_with(suffix.as_str()))
-            .or(sessions.first())
+        sessions.iter().find(|s| s.id.ends_with(suffix.as_str())).or(sessions.first())
     } else {
         sessions.first()
     };
@@ -225,16 +218,8 @@ async fn export_session(binary: &str, workspace_dir: &Path, dest: &Path, log_tex
 /// Run N samples for a single model, saving artifacts to `run_dir/<model-slug>/`.
 #[allow(clippy::too_many_arguments)]
 async fn run_model_samples(
-    run_dir: &Path,
-    workspace_dir: &Path,
-    binary: &str,
-    model: &str,
-    strategy_name: &str,
-    prompt: &str,
-    samples: usize,
-    timeout: &str,
-    delay: Duration,
-    cancel: CancellationToken,
+    run_dir: &Path, workspace_dir: &Path, binary: &str, model: &str, strategy_name: &str, prompt: &str, samples: usize,
+    timeout: &str, delay: Duration, cancel: CancellationToken,
 ) -> Vec<SampleResult> {
     let slug = model_slug(model);
     let mut results = Vec::new();
@@ -251,22 +236,14 @@ async fn run_model_samples(
             Ok(t) => t,
             Err(e) => {
                 warn!(model = %model, sample = sample_num, error = %e, "failed to create temp dir");
-                results.push(SampleResult {
-                    duration: Duration::ZERO,
-                    success: false,
-                    has_output: false,
-                });
+                results.push(SampleResult { duration: Duration::ZERO, success: false, has_output: false });
                 continue;
             }
         };
 
         if let Err(e) = copy_dir_recursive(workspace_dir, tmp.path()) {
             warn!(model = %model, sample = sample_num, error = %e, "failed to copy workspace");
-            results.push(SampleResult {
-                duration: Duration::ZERO,
-                success: false,
-                has_output: false,
-            });
+            results.push(SampleResult { duration: Duration::ZERO, success: false, has_output: false });
             continue;
         }
 
@@ -290,9 +267,7 @@ async fn run_model_samples(
         };
 
         // Read output.md from the temp dir
-        let output_content = tokio::fs::read_to_string(tmp.path().join("output.md"))
-            .await
-            .unwrap_or_default();
+        let output_content = tokio::fs::read_to_string(tmp.path().join("output.md")).await.unwrap_or_default();
 
         let has_output = !output_content.trim().is_empty();
         let success = exit_code == Some(0) && has_output;
@@ -306,11 +281,7 @@ async fn run_model_samples(
             let _ = std::fs::write(sample_dir.join("log.txt"), &log);
 
             // Build log_for_export before moving `error` into SampleMeta
-            let log_for_export: String = if !log.is_empty() {
-                log.clone()
-            } else {
-                error.as_deref().unwrap_or("").to_string()
-            };
+            let log_for_export: String = if !log.is_empty() { log.clone() } else { error.as_deref().unwrap_or("").to_string() };
 
             let meta = SampleMeta {
                 model: model.to_string(),
@@ -343,11 +314,7 @@ async fn run_model_samples(
             "sample complete"
         );
 
-        results.push(SampleResult {
-            duration,
-            success,
-            has_output,
-        });
+        results.push(SampleResult { duration, success, has_output });
 
         // Delay between samples (skip after last)
         if sample_num < samples && !cancel.is_cancelled() {
@@ -371,10 +338,7 @@ pub(crate) async fn run_benchmark(config: &Config, registry: &StrategyRegistry, 
             .find(|c| c.slug == *slug)
             .ok_or_else(|| anyhow::anyhow!("no output channel with slug '{slug}'"))?
     } else {
-        config
-            .output_channel
-            .first()
-            .ok_or_else(|| anyhow::anyhow!("no output channels configured"))?
+        config.output_channel.first().ok_or_else(|| anyhow::anyhow!("no output channels configured"))?
     };
 
     info!(channel = %channel_config.slug, "benchmark channel selected");
@@ -384,9 +348,7 @@ pub(crate) async fn run_benchmark(config: &Config, registry: &StrategyRegistry, 
     let mut bench_config = config.clone();
     bench_config.pail.data_dir = temp_data.path().to_path_buf();
     let pool = db::create_pool(&bench_config).await.context("creating temp database")?;
-    store::sync_config_to_db(&pool, &bench_config)
-        .await
-        .context("syncing config to temp database")?;
+    store::sync_config_to_db(&pool, &bench_config).await.context("syncing config to temp database")?;
 
     let cancel = CancellationToken::new();
     let cancel_signal = cancel.clone();
@@ -403,14 +365,9 @@ pub(crate) async fn run_benchmark(config: &Config, registry: &StrategyRegistry, 
         .ok_or_else(|| anyhow::anyhow!("no content items found in the specified time window"))?;
 
     // Resolve strategy (--strategy flag overrides channel/default)
-    let strategy_name = args
-        .strategy
-        .as_deref()
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| strategy::resolve_strategy_name(config, channel_config));
-    let strat = registry
-        .get(&strategy_name)
-        .ok_or_else(|| anyhow::anyhow!("strategy '{strategy_name}' not found in registry"))?;
+    let strategy_name =
+        args.strategy.as_deref().map(|s| s.to_string()).unwrap_or_else(|| strategy::resolve_strategy_name(config, channel_config));
+    let strat = registry.get(&strategy_name).ok_or_else(|| anyhow::anyhow!("strategy '{strategy_name}' not found in registry"))?;
     let merged_opencode_config = strategy::resolve_opencode_config(strat)?;
 
     info!(strategy = %strategy_name, "using strategy for benchmark");
@@ -420,27 +377,16 @@ pub(crate) async fn run_benchmark(config: &Config, registry: &StrategyRegistry, 
 
     // Prepare workspace
     let ws = generate::prepare_workspace(
-        config,
-        channel_config,
-        strat,
-        &merged_opencode_config,
-        &ctx.items,
-        &source_ref_map,
-        &ctx.folder_channels,
-        ctx.covers_from,
-        ctx.covers_to,
+        config, channel_config, strat, &merged_opencode_config, &ctx.items, &source_ref_map, &ctx.folder_channels,
+        ctx.covers_from, ctx.covers_to,
     )
     .await
     .context("preparing workspace")?;
 
-    let prompt = generate::write_prompt(ws.path(), strat, channel_config)
-        .await
-        .context("writing prompt")?;
+    let prompt = generate::write_prompt(ws.path(), strat, channel_config).await.context("writing prompt")?;
 
     // Write empty output.md to workspace
-    tokio::fs::write(ws.path().join("output.md"), "")
-        .await
-        .context("writing empty output.md")?;
+    tokio::fs::write(ws.path().join("output.md"), "").await.context("writing empty output.md")?;
 
     // Create run directory
     let run_id = make_run_id(&channel_config.slug);
@@ -471,16 +417,7 @@ pub(crate) async fn run_benchmark(config: &Config, registry: &StrategyRegistry, 
 
         join_set.spawn(async move {
             let results = run_model_samples(
-                &run_dir,
-                &workspace_snapshot,
-                &binary,
-                &model,
-                &strategy_name,
-                &prompt,
-                samples,
-                &timeout,
-                delay,
-                cancel,
+                &run_dir, &workspace_snapshot, &binary, &model, &strategy_name, &prompt, samples, &timeout, delay, cancel,
             )
             .await;
             (model, results)
@@ -512,11 +449,7 @@ pub(crate) async fn run_benchmark(config: &Config, registry: &StrategyRegistry, 
                 } else {
                     Duration::ZERO
                 };
-                let partial_note = if partial > 0 {
-                    format!(" ({partial} partial)")
-                } else {
-                    String::new()
-                };
+                let partial_note = if partial > 0 { format!(" ({partial} partial)") } else { String::new() };
                 println!(
                     "  {:<width$} {}/{} passed{}, mean {:.0?}",
                     format!("{slug}:"),

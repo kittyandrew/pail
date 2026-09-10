@@ -167,13 +167,10 @@ pub enum TgCommands {
 
 /// Parse --since/--from/--to into a TimeWindow.
 pub fn parse_time_window(
-    since: &Option<String>,
-    from: &Option<String>,
-    to: &Option<String>,
+    since: &Option<String>, from: &Option<String>, to: &Option<String>,
 ) -> Result<Option<pipeline::TimeWindow>> {
     if let Some(since_str) = since {
-        let duration =
-            humantime::parse_duration(since_str).with_context(|| format!("invalid --since duration: '{since_str}'"))?;
+        let duration = humantime::parse_duration(since_str).with_context(|| format!("invalid --since duration: '{since_str}'"))?;
         Ok(Some(pipeline::TimeWindow::Since(duration)))
     } else if let (Some(from_str), Some(to_str)) = (from, to) {
         let from_dt = chrono::DateTime::parse_from_rfc3339(from_str)
@@ -185,10 +182,7 @@ pub fn parse_time_window(
         if from_dt >= to_dt {
             anyhow::bail!("--from must be before --to");
         }
-        Ok(Some(pipeline::TimeWindow::Explicit {
-            from: from_dt,
-            to: to_dt,
-        }))
+        Ok(Some(pipeline::TimeWindow::Explicit { from: from_dt, to: to_dt }))
     } else {
         Ok(None)
     }

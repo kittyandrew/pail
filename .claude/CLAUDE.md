@@ -25,7 +25,7 @@ All checks run in GitHub Actions CI (`.github/workflows/ci.yml`) on push to `mai
 # Format Nix files
 alejandra -c .
 
-# Format Rust code (max_width = 121, see rustfmt.toml)
+# Format Rust code (see rustfmt.toml)
 cargo fmt --check
 
 # Lint
@@ -61,6 +61,8 @@ Every spec file (`docs/specs/`) and idea file (`docs/ideas/`) must have a `## De
 
 When reviewing code or auditing the project, **verify claims before reporting them.** Don't assume something is missing based on indirect evidence (e.g., git status snapshots). Check the filesystem directly — glob for files, read them, confirm they exist or don't — before listing an issue.
 
+Run `kitty-review` before committing each changeset. Add tests only for high-value behavior and failure paths; use existing checks for routine dependency and formatting changes.
+
 <!-- sentry-verified -->
 ## Observability
 
@@ -93,6 +95,9 @@ dependencies or build plumbing.
 ## Code Style
 
 - **No imports inside functions or mid-file.** All `use` statements go at the top of the file.
+- Use Rust edition 2024. Run `cargo fix --edition` before changing older editions in `Cargo.toml`.
+- Follow `rustfmt.toml`: 131 columns for lines and width heuristics, with compressed function parameters. Verify the configuration before formatting.
+- Group related imports into single-line `use` statements up to 131 columns. Split larger groups into separate statements.
 
 ## Git Workflow
 

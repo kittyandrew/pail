@@ -44,20 +44,14 @@ struct CliPipelineSetup<'a> {
 
 /// Set up DB, config sync, channel lookup, cancellation, and TG connection.
 async fn setup_pipeline<'a>(
-    config: &'a Config,
-    slug: &str,
-    since: &Option<String>,
-    from: &Option<String>,
-    to: &Option<String>,
+    config: &'a Config, slug: &str, since: &Option<String>, from: &Option<String>, to: &Option<String>,
 ) -> Result<CliPipelineSetup<'a>> {
     let time_window = cli::parse_time_window(since, from, to)?;
 
     let pool = db::create_pool(config).await.context("creating database")?;
     info!(db_path = %config.db_path().display(), "database ready");
 
-    store::sync_config_to_db(&pool, config)
-        .await
-        .context("syncing config to database")?;
+    store::sync_config_to_db(&pool, config).await.context("syncing config to database")?;
     info!("config synced to database");
 
     let channel_config = config
@@ -74,20 +68,16 @@ async fn setup_pipeline<'a>(
     });
 
     // Check if this channel has TG sources
-    let has_tg_sources = channel_config.sources.iter().any(|name| {
-        config
-            .source
-            .iter()
-            .any(|s| s.name == *name && s.source_type.starts_with("telegram_"))
-    });
+    let has_tg_sources = channel_config
+        .sources
+        .iter()
+        .any(|name| config.source.iter().any(|s| s.name == *name && s.source_type.starts_with("telegram_")));
 
     let tg_conn = if has_tg_sources && config.telegram.enabled {
         if config.telegram.api_id.is_none() || config.telegram.api_hash.is_none() {
             anyhow::bail!("Telegram sources require [telegram].api_id and api_hash");
         }
-        let conn = telegram::connect(config, &pool)
-            .await
-            .context("connecting to Telegram")?;
+        let conn = telegram::connect(config, &pool).await.context("connecting to Telegram")?;
 
         // Check auth
         match conn.client.is_authorized().await {
@@ -99,11 +89,7 @@ async fn setup_pipeline<'a>(
         // Resolve source IDs and folders (same as daemon::start_telegram)
         let tg_sources = store::get_tg_sources(&pool).await?;
         telegram::resolve_source_ids(&conn.client, &pool, &tg_sources).await?;
-        let folder_sources: Vec<_> = tg_sources
-            .iter()
-            .filter(|s| s.source_type == "telegram_folder")
-            .cloned()
-            .collect();
+        let folder_sources: Vec<_> = tg_sources.iter().filter(|s| s.source_type == "telegram_folder").cloned().collect();
         telegram::resolve_folders(&conn.client, &pool, &folder_sources).await?;
         telegram::ensure_peer_cache(&conn.client, &pool, &tg_sources).await?;
 
@@ -112,13 +98,7 @@ async fn setup_pipeline<'a>(
         None
     };
 
-    Ok(CliPipelineSetup {
-        pool,
-        channel_config,
-        time_window,
-        cancel,
-        tg_conn,
-    })
+    Ok(CliPipelineSetup { pool, channel_config, time_window, cancel, tg_conn })
 }
 
 #[tokio::main]
@@ -132,11 +112,7 @@ async fn main() -> Result<()> {
         std::env::var("SENTRY_DSN").ok(),
         sentry::ClientOptions {
             traces_sample_rate: 1.0,
-            environment: Some(
-                std::env::var("SENTRY_ENVIRONMENT")
-                    .unwrap_or_else(|_| "development".to_string())
-                    .into(),
-            ),
+            environment: Some(std::env::var("SENTRY_ENVIRONMENT").unwrap_or_else(|_| "development".to_string()).into()),
             release: std::env::var("GIT_SHA").ok().map(Into::into),
             ..Default::default()
         },
@@ -201,14 +177,7 @@ async fn main() -> Result<()> {
                 result?;
             }
         },
-        Some(Commands::Generate {
-            slug,
-            output,
-            strategy,
-            since,
-            from,
-            to,
-        }) => {
+        Some(Commands::Generate { slug, output, strategy, since, from, to }) => {
             let setup = setup_pipeline(&config, &slug, &since, &from, &to).await?;
             let tg_client_ref = setup.tg_conn.as_ref().map(|c| &c.client);
 
@@ -247,13 +216,7 @@ async fn main() -> Result<()> {
                 conn.runner_handle.abort();
             }
         }
-        Some(Commands::Interactive {
-            slug,
-            strategy,
-            since,
-            from,
-            to,
-        }) => {
+        Some(Commands::Interactive { slug, strategy, since, from, to }) => {
             let setup = setup_pipeline(&config, &slug, &since, &from, &to).await?;
             let tg_client_ref = setup.tg_conn.as_ref().map(|c| &c.client);
 
@@ -285,31 +248,11 @@ async fn main() -> Result<()> {
             }
         }
         Some(Commands::Benchmark { command }) => match command {
-            BenchmarkCommands::Run {
-                since,
-                from,
-                to,
-                channel,
-                strategy,
-                samples,
-                delay,
-                timeout,
-                models,
-            } => {
+            BenchmarkCommands::Run { since, from, to, channel, strategy, samples, delay, timeout, models } => {
                 benchmark::run_benchmark(
                     &config,
                     &registry,
-                    benchmark::BenchmarkRunArgs {
-                        since,
-                        from,
-                        to,
-                        channel,
-                        strategy,
-                        samples,
-                        delay,
-                        timeout,
-                        models,
-                    },
+                    benchmark::BenchmarkRunArgs { since, from, to, channel, strategy, samples, delay, timeout, models },
                 )
                 .await?;
             }
@@ -317,26 +260,18 @@ async fn main() -> Result<()> {
         Some(Commands::Strategy { command }) => match command {
             StrategyCommands::List => {
                 let strategies = registry.list();
-                println!(
-                    "{:<12} {:<8} {:<8} {:<6} DESCRIPTION",
-                    "NAME", "SOURCE", "TIMEOUT", "TOOLS"
-                );
+                println!("{:<12} {:<8} {:<8} {:<6} DESCRIPTION", "NAME", "SOURCE", "TIMEOUT", "TOOLS");
                 for s in &strategies {
                     let source = match s.source {
                         strategy::StrategySource::BuiltIn => "built-in",
                         strategy::StrategySource::User => "user",
                     };
                     let tool_count = s.meta.tools.len();
-                    println!(
-                        "{:<12} {:<8} {:<8} {:<6} {}",
-                        s.meta.name, source, s.meta.timeout, tool_count, s.meta.description
-                    );
+                    println!("{:<12} {:<8} {:<8} {:<6} {}", s.meta.name, source, s.meta.timeout, tool_count, s.meta.description);
                 }
             }
             StrategyCommands::Show { name } => {
-                let strat = registry
-                    .get(&name)
-                    .ok_or_else(|| anyhow::anyhow!("strategy '{name}' not found"))?;
+                let strat = registry.get(&name).ok_or_else(|| anyhow::anyhow!("strategy '{name}' not found"))?;
                 let merged = strategy::resolve_opencode_config(strat)?;
 
                 println!("Strategy: {}", strat.meta.name);
@@ -352,11 +287,7 @@ async fn main() -> Result<()> {
                 println!("Max retries: {}", strat.meta.max_retries);
                 println!(
                     "Tools: {}",
-                    if strat.meta.tools.is_empty() {
-                        "(none)".to_string()
-                    } else {
-                        strat.meta.tools.join(", ")
-                    }
+                    if strat.meta.tools.is_empty() { "(none)".to_string() } else { strat.meta.tools.join(", ") }
                 );
                 println!("\n--- Merged opencode.json ---");
                 println!("{}", serde_json::to_string_pretty(&merged)?);
@@ -400,9 +331,7 @@ async fn main() -> Result<()> {
             }
 
             let pool = db::create_pool(&config).await.context("creating database")?;
-            let conn = telegram::connect(&config, &pool)
-                .await
-                .context("connecting to Telegram")?;
+            let conn = telegram::connect(&config, &pool).await.context("connecting to Telegram")?;
 
             match command {
                 TgCommands::Login => {

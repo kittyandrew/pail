@@ -35,19 +35,11 @@ pub struct FeedQuery {
 }
 
 async fn feed_handler(
-    State(state): State<AppState>,
-    Path(path): Path<String>,
-    Query(query): Query<FeedQuery>,
-    headers: HeaderMap,
+    State(state): State<AppState>, Path(path): Path<String>, Query(query): Query<FeedQuery>, headers: HeaderMap,
 ) -> Response {
     // Authenticate
     if !authenticate(&state.feed_token, &query, &headers) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            [(header::WWW_AUTHENTICATE, "Basic realm=\"pail\"")],
-            "Unauthorized",
-        )
-            .into_response();
+        return (StatusCode::UNAUTHORIZED, [(header::WWW_AUTHENTICATE, "Basic realm=\"pail\"")], "Unauthorized").into_response();
     }
 
     // Parse path: expected format is "<username>/<slug>.atom"
@@ -87,12 +79,7 @@ async fn feed_handler(
 
     let xml = feed.to_string();
 
-    (
-        StatusCode::OK,
-        [(header::CONTENT_TYPE, "application/atom+xml; charset=utf-8")],
-        xml,
-    )
-        .into_response()
+    (StatusCode::OK, [(header::CONTENT_TYPE, "application/atom+xml; charset=utf-8")], xml).into_response()
 }
 
 fn authenticate(feed_token: &str, query: &FeedQuery, headers: &HeaderMap) -> bool {
@@ -127,23 +114,14 @@ fn constant_time_eq(a: &str, b: &str) -> bool {
 
 /// Derive the base URL from request headers (works behind reverse proxies).
 fn derive_base_url(headers: &HeaderMap) -> String {
-    let scheme = headers
-        .get("x-forwarded-proto")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("http");
-    let host = headers
-        .get(header::HOST)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("localhost");
+    let scheme = headers.get("x-forwarded-proto").and_then(|v| v.to_str().ok()).unwrap_or("http");
+    let host = headers.get(header::HOST).and_then(|v| v.to_str().ok()).unwrap_or("localhost");
     format!("{scheme}://{host}")
 }
 
 /// Escape HTML special characters for safe embedding in HTML attributes/content.
 fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
 async fn article_handler(State(state): State<AppState>, Path(id): Path<String>) -> Response {
@@ -200,31 +178,20 @@ blockquote {{ border-left: 3px solid #ddd; margin-left: 0; padding-left: 1rem; c
 }
 
 fn build_atom_feed(
-    channel: &crate::models::OutputChannel,
-    articles: &[crate::models::GeneratedArticleRow],
-    base_url: &str,
+    channel: &crate::models::OutputChannel, articles: &[crate::models::GeneratedArticleRow], base_url: &str,
 ) -> atom_syndication::Feed {
     let to_fixed = |dt: &chrono::DateTime<chrono::Utc>| -> chrono::DateTime<FixedOffset> {
         dt.with_timezone(&FixedOffset::east_opt(0).unwrap())
     };
 
-    let feed_updated = articles
-        .first()
-        .map(|a| to_fixed(&a.generated_at))
-        .unwrap_or_else(|| to_fixed(&chrono::Utc::now()));
+    let feed_updated = articles.first().map(|a| to_fixed(&a.generated_at)).unwrap_or_else(|| to_fixed(&chrono::Utc::now()));
 
     let entries: Vec<Entry> = articles
         .iter()
         .map(|article| {
             // Parse topics from JSON + strategy category
             let topics: Vec<String> = serde_json::from_str(&article.topics).unwrap_or_default();
-            let mut categories: Vec<Category> = topics
-                .into_iter()
-                .map(|t| Category {
-                    term: t,
-                    ..Default::default()
-                })
-                .collect();
+            let mut categories: Vec<Category> = topics.into_iter().map(|t| Category { term: t, ..Default::default() }).collect();
             categories.push(Category {
                 term: format!("strategy:{}", article.strategy_used),
                 scheme: Some("urn:pail:strategy".to_string()),
@@ -233,10 +200,7 @@ fn build_atom_feed(
 
             // Derive author from model_used: "anthropic/claude-sonnet-4-5" -> "pail-opencode-claude-sonnet-4-5"
             let model_short = article.model_used.split('/').next_back().unwrap_or(&article.model_used);
-            let author = Person {
-                name: format!("pail-opencode-{model_short}"),
-                ..Default::default()
-            };
+            let author = Person { name: format!("pail-opencode-{model_short}"), ..Default::default() };
 
             // Sanitize at feed-serving time as a safety net: articles already in the DB
             // may contain invalid XML control characters from older LLM generations

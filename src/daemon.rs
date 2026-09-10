@@ -16,17 +16,13 @@ use crate::{cleanup, db, generate, poller, scheduler, server, store, telegram, t
 pub async fn run(config: Config, registry: StrategyRegistry) -> Result<()> {
     // Validate models early so provider auth issues surface at boot, not at first
     // scheduled generation (which would silently fail and produce Sentry noise).
-    generate::validate_models(&config)
-        .await
-        .context("model validation failed")?;
+    generate::validate_models(&config).await.context("model validation failed")?;
 
     let pool = db::create_pool(&config).await.context("creating database")?;
     info!(db_path = %config.db_path().display(), "database ready");
 
     // Sync config to DB
-    store::sync_config_to_db(&pool, &config)
-        .await
-        .context("syncing config to database")?;
+    store::sync_config_to_db(&pool, &config).await.context("syncing config to database")?;
     info!("config synced to database");
 
     // Bootstrap feed token
@@ -66,16 +62,11 @@ pub async fn run(config: Config, registry: StrategyRegistry) -> Result<()> {
 
     // Build and start HTTP server
     let timezone: chrono_tz::Tz = config.pail.timezone.parse().expect("timezone already validated");
-    let app_state = server::AppState {
-        pool: pool.clone(),
-        feed_token,
-        timezone,
-    };
+    let app_state = server::AppState { pool: pool.clone(), feed_token, timezone };
 
     let router = server::build_router(app_state);
-    let listener = tokio::net::TcpListener::bind(&config.pail.listen)
-        .await
-        .with_context(|| format!("binding to {}", config.pail.listen))?;
+    let listener =
+        tokio::net::TcpListener::bind(&config.pail.listen).await.with_context(|| format!("binding to {}", config.pail.listen))?;
 
     info!(listen = %config.pail.listen, "HTTP server listening");
 
@@ -119,14 +110,10 @@ pub async fn run(config: Config, registry: StrategyRegistry) -> Result<()> {
 /// Start the Telegram listener. Returns a JoinHandle for the listener task and a cloned Client
 /// for use by the scheduler (mark-as-read).
 async fn start_telegram(
-    config: &Config,
-    pool: &SqlitePool,
-    cancel: CancellationToken,
+    config: &Config, pool: &SqlitePool, cancel: CancellationToken,
 ) -> Result<(tokio::task::JoinHandle<()>, grammers_client::Client)> {
     // Connect (session data is stored in the database, loaded by SqlxSession)
-    let conn = telegram::connect(config, pool)
-        .await
-        .context("connecting to Telegram")?;
+    let conn = telegram::connect(config, pool).await.context("connecting to Telegram")?;
 
     // Check authorization
     match conn.client.is_authorized().await {
@@ -155,37 +142,21 @@ async fn start_telegram(
     // Resolve source usernames -> tg_ids
     let tg_sources = store::get_tg_sources(pool).await.context("loading TG sources")?;
 
-    telegram::resolve_source_ids(&conn.client, pool, &tg_sources)
-        .await
-        .context("resolving TG source IDs")?;
+    telegram::resolve_source_ids(&conn.client, pool, &tg_sources).await.context("resolving TG source IDs")?;
 
     // Resolve folder sources
-    let folder_sources: Vec<_> = tg_sources
-        .iter()
-        .filter(|s| s.source_type == "telegram_folder")
-        .cloned()
-        .collect();
+    let folder_sources: Vec<_> = tg_sources.iter().filter(|s| s.source_type == "telegram_folder").cloned().collect();
 
-    telegram::resolve_folders(&conn.client, pool, &folder_sources)
-        .await
-        .context("resolving TG folders")?;
+    telegram::resolve_folders(&conn.client, pool, &folder_sources).await.context("resolving TG folders")?;
 
-    telegram::ensure_peer_cache(&conn.client, pool, &tg_sources)
-        .await
-        .context("warming TG peer cache")?;
+    telegram::ensure_peer_cache(&conn.client, pool, &tg_sources).await.context("warming TG peer cache")?;
 
     // Build subscription map
     // Re-fetch sources after resolution to get updated tg_ids
     let tg_sources = store::get_tg_sources(pool).await.context("reloading TG sources")?;
-    let direct_sources: Vec<_> = tg_sources
-        .iter()
-        .filter(|s| s.source_type != "telegram_folder")
-        .cloned()
-        .collect();
+    let direct_sources: Vec<_> = tg_sources.iter().filter(|s| s.source_type != "telegram_folder").cloned().collect();
 
-    let folder_channels = store::get_all_folder_channel_ids(pool)
-        .await
-        .context("loading folder channel IDs")?;
+    let folder_channels = store::get_all_folder_channel_ids(pool).await.context("loading folder channel IDs")?;
 
     let subscription_map = telegram::build_subscription_map(&direct_sources, &folder_channels);
     let subscribed_count = subscription_map.len();
@@ -232,11 +203,7 @@ async fn bootstrap_feed_token(pool: &SqlitePool, config: &Config) -> Result<Stri
 }
 
 fn generate_token() -> String {
-    rand::rng()
-        .sample_iter(&Alphanumeric)
-        .take(32)
-        .map(char::from)
-        .collect()
+    rand::rng().sample_iter(&Alphanumeric).take(32).map(char::from).collect()
 }
 
 async fn wait_for_shutdown() {
@@ -244,8 +211,8 @@ async fn wait_for_shutdown() {
 
     #[cfg(unix)]
     {
-        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("failed to register SIGTERM handler");
+        let mut sigterm =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).expect("failed to register SIGTERM handler");
         tokio::select! {
             _ = ctrl_c => {},
             _ = sigterm.recv() => {},
