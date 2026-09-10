@@ -1,5 +1,4 @@
-use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::{collections::HashSet, path::Path, path::PathBuf};
 
 use anyhow::{Context, Result};
 use serde::Deserialize;

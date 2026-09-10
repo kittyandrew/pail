@@ -1,6 +1,4 @@
-use std::collections::{HashMap, HashSet};
-use std::str::FromStr;
-use std::sync::{Arc, Mutex};
+use std::{collections::HashMap, collections::HashSet, str::FromStr, sync::Arc, sync::Mutex};
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Datelike, NaiveTime, TimeZone, Utc, Weekday};
@@ -10,10 +8,7 @@ use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
-use crate::config::Config;
-use crate::pipeline;
-use crate::store;
-use crate::strategy::StrategyRegistry;
+use crate::{config::Config, pipeline, store, strategy::StrategyRegistry};
 
 /// RAII guard that removes a channel ID from the in-flight set on drop.
 /// Ensures cleanup even if the generation task panics.

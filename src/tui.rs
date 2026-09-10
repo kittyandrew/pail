@@ -1,16 +1,12 @@
-use std::collections::HashSet;
-use std::fmt;
-use std::io::Write;
-use std::path::Path;
+use std::{collections::HashSet, fmt, io::Write, path::Path};
 
 use anyhow::{Context, Result};
 use inquire::{InquireError, MultiSelect, Select};
 
 use grammers_client::Client;
 
-use crate::config::{load_config, validate_config};
-use crate::config_edit::{self, NewSource, TgSourceInfo};
 use crate::telegram::{TgConnection, TgDialog, TgFolder};
+use crate::{config::load_config, config::validate_config, config_edit, config_edit::NewSource, config_edit::TgSourceInfo};
 
 // ─── Display types ───
 

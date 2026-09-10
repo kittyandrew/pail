@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-use sqlx::{Executor, Row, SqlitePool};
+use sqlx::{Executor, Row, SqlitePool, sqlite::SqliteConnectOptions, sqlite::SqlitePoolOptions};
 use tracing::info;
 
 use crate::config::Config;

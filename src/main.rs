@@ -30,8 +30,7 @@ use tracing_subscriber::prelude::*;
 
 use crate::cli::{BenchmarkCommands, Cli, Commands, ConfigCommands, StrategyCommands, TgCommands};
 use crate::config::{Config, OutputChannelConfig, load_config, validate_config};
-use crate::strategy::StrategyRegistry;
-use crate::telegram::TgConnection;
+use crate::{strategy::StrategyRegistry, telegram::TgConnection};
 
 /// Shared CLI setup for commands that run a pipeline (Generate, Interactive).
 struct CliPipelineSetup<'a> {

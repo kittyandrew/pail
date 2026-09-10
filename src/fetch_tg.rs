@@ -2,16 +2,14 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use grammers_client::Client;
-use grammers_client::media::Media;
+use grammers_client::{Client, media::Media};
 use grammers_session::types::{PeerAuth, PeerId, PeerRef};
 use sqlx::SqlitePool;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use crate::models::{ContentItem, Source};
-use crate::store;
+use crate::{models::ContentItem, models::Source, store};
 
 /// Convert a grammers Message to a pail ContentItem.
 /// Returns None for empty messages (no text, no media).

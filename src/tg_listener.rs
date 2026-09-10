@@ -1,9 +1,6 @@
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
-use grammers_client::Client;
-use grammers_client::client::UpdatesConfiguration;
-use grammers_client::update::Update;
+use grammers_client::{Client, client::UpdatesConfiguration, update::Update};
 use grammers_session::updates::UpdatesLike;
 use grammers_tl_types as tl;
 use sqlx::SqlitePool;
@@ -11,9 +8,7 @@ use tokio::sync::{RwLock, mpsc};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
-use crate::fetch_tg;
-use crate::store;
-use crate::telegram;
+use crate::{fetch_tg, store, telegram};
 
 /// Run the Telegram event listener loop.
 /// Receives live updates and stores messages from subscribed chats.
