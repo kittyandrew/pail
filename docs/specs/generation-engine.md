@@ -71,10 +71,13 @@ The `opencode.json` is produced by deep-merging a global base config (`src/strat
 Run as subprocess:
 ```bash
 cd /tmp/pail-gen-<uuid>/ && opencode run \
+  --dir /tmp/pail-gen-<uuid>/ \
   --model <provider/model> \
   -- \
   "<full rendered prompt text>"
 ```
+
+The explicit `--dir` selects the prepared workspace even when the parent process has a different `PWD` environment value. The subprocess also runs with that workspace as its working directory.
 
 The workspace includes an `opencode.json` produced by merging the global base config with the strategy's overlay (defaults include `share: "auto"` and `agent.build.variant: "high"`; the agentic strategy overrides to `"max"`). Every session is automatically shared and reviewable via a shareable link. stdout/stderr is captured as the generation log. The article is written by the AI agent to `output.md`.
 
@@ -241,9 +244,9 @@ Timeout, max_retries, system prompt, and opencode project config are all defined
   Options: hard dependency / optional with fallback / pluggable backends.
   Rationale: opencode is the core of the generation pipeline. A fallback would be a different (worse) product. Included in Docker image.
 
-- **opencode invocation:** `cd <workspace> && opencode run --model <model> -- "<prompt>"`.
-  Options: CWD set to workspace + prompt as arg / `-f` file attachment / stdin pipe.
-  Rationale: CWD lets opencode discover and read workspace files directly. Project config is written from `[opencode.project_config]` as `opencode.json` in the workspace (works for both `run` and TUI modes). Prompt as positional arg is simplest.
+- **opencode invocation:** `cd <workspace> && opencode run --dir <workspace> --model <model> -- "<prompt>"`.
+  Options: explicit directory and CWD + prompt as arg / CWD alone + prompt as arg / `-f` file attachment / stdin pipe.
+  Rationale: the explicit directory prevents inherited `PWD` from selecting the parent's workspace. CWD lets subprocess tools read workspace files directly. Project config is written from `[opencode.project_config]` as `opencode.json` in the workspace (works for both `run` and TUI modes). Prompt as positional arg is simplest.
 
 - **Project config over CLI flags:** `[opencode.project_config]` written as `opencode.json` instead of `extra_args` CLI flags.
   Options: `extra_args` CLI flags / `opencode.json` project config / both.

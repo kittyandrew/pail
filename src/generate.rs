@@ -493,6 +493,8 @@ pub(crate) async fn invoke_opencode(
 
     let mut cmd = tokio::process::Command::new(binary);
     cmd.arg("run")
+        .arg("--dir")
+        .arg(workspace) // OpenCode otherwise selects its workspace from inherited PWD.
         .arg("--model")
         .arg(model)
         .arg("--")
