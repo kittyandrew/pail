@@ -9,8 +9,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     opencode = {
-      url = "github:anomalyco/opencode";
-      inputs.nixpkgs.follows = "nixpkgs";
+      url = "github:anomalyco/opencode/733b2c627e5aec39cb33cc22373bdce33053ef2c";
     };
   };
 

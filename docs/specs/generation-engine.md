@@ -49,7 +49,7 @@ Resolve the generation strategy (channel override → `[pail].default_strategy` 
 
 Each source file has YAML frontmatter (name, type, item_count, description) followed by content items separated by `---`.
 
-**Strategy-driven workspace:** The tools written to `.opencode/tools/` depend on the strategy's `tools` frontmatter list. Built-in tools (e.g., `fetch-article`) are embedded in the binary via `include_str!` from `src/opencode_tools/`. User strategy tools are copied from the strategy directory. opencode auto-discovers tools from `.opencode/tools/*.ts` and auto-installs dependencies from `.opencode/package.json` via `bun install`.
+**Strategy-driven workspace:** The tools written to `.opencode/tools/` depend on the strategy's `tools` frontmatter list. Built-in tools (e.g., `fetch-article`) are embedded in the binary via `include_str!` from `src/opencode_tools/`. User strategy tools are copied from the strategy directory. opencode auto-discovers tools from `.opencode/tools/*.ts` and installs dependencies from `.opencode/package.json` through its built-in npm installer (`@npmcli/arborist`).
 
 The `opencode.json` is produced by deep-merging a global base config (`src/strategies/opencode.json`) with the strategy's optional overlay. See [Generation Strategies spec](generation-strategies.md) for merge semantics.
 
