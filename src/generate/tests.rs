@@ -17,6 +17,16 @@ fn fixture(script: &str) -> tempfile::TempDir {
 }
 
 #[tokio::test]
+async fn passes_the_workspace_as_an_explicit_directory() {
+    let workspace =
+        fixture("[ \"$1\" = run ] && [ \"$2\" = --dir ] && [ \"$3\" -ef . ] && [ \"$4\" = --model ] && [ \"$5\" = fixture ]");
+    let binary = workspace.path().join("opencode");
+    let (_, code) =
+        invoke_opencode(binary.to_str().unwrap(), workspace.path(), "fixture", "", "10s", CancellationToken::new()).await.unwrap();
+    assert_eq!(code, Some(0));
+}
+
+#[tokio::test]
 async fn captures_both_streams_beyond_pipe_capacity() {
     let workspace = fixture(
         "i=0; while [ $i -lt 8192 ]; do printf 'stdout payload 0123456789\\n'; printf 'stderr payload 0123456789\\n' >&2; i=$((i+1)); done",
